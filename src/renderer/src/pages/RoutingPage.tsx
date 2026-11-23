@@ -113,6 +113,24 @@ export const RoutingPage: React.FC<RoutingPageProps> = ({ settings, onSettingsUp
               className="w-4 h-4 accent-cyan-500 rounded cursor-pointer"
             />
           </div>
+
+          <div className="p-3.5 rounded-xl border border-cyan-500/30 bg-cyan-950/20 flex items-center justify-between">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-xs text-cyan-300 block">سیستم تکه‌تکه‌سازی بسته‌ها (TLS Hello Fragmentation)</span>
+                <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800/40">ANTI-DPI</span>
+              </div>
+              <span className="text-[11px] text-slate-400">
+                بسته‌های ClientHello را به تکه‌های کوچک خرد می‌کند تا فیلترینگ SNI اپراتورها (همراه اول/ایرانسل) دور زده شود.
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={settings.enableTlsFragment}
+              onChange={() => handleToggle('enableTlsFragment')}
+              className="w-4 h-4 accent-cyan-500 rounded cursor-pointer"
+            />
+          </div>
         </div>
       </div>
     </div>

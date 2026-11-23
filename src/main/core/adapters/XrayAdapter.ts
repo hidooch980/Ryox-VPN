@@ -32,8 +32,15 @@ export class XrayAdapter {
       }
     ];
 
+    const proxyOutbound = this.buildOutbound(server);
+    if (settings.enableTlsFragment) {
+      if (!proxyOutbound.streamSettings) proxyOutbound.streamSettings = {};
+      if (!proxyOutbound.streamSettings.sockopt) proxyOutbound.streamSettings.sockopt = {};
+      proxyOutbound.streamSettings.sockopt.dialerProxy = 'fragment';
+    }
+
     const outbounds: any[] = [
-      this.buildOutbound(server),
+      proxyOutbound,
       {
         tag: 'direct',
         protocol: 'freedom',
@@ -54,6 +61,25 @@ export class XrayAdapter {
         }
       }
     ];
+
+    if (settings.enableTlsFragment) {
+      outbounds.push({
+        tag: 'fragment',
+        protocol: 'freedom',
+        settings: {
+          fragment: {
+            packets: 'tlshello',
+            length: settings.fragmentLength || '100-200',
+            interval: settings.fragmentInterval || '10-20'
+          }
+        },
+        streamSettings: {
+          sockopt: {
+            tcpNoDelay: true
+          }
+        }
+      });
+    }
 
     const routingRules: any[] = [
       {

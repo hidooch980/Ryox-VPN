@@ -7,6 +7,9 @@ import { FreeSourceDiscovery } from './sources/FreeSourceDiscovery';
 import { SubscriptionManager } from './subscription/SubscriptionManager';
 import { AppUpdater } from './updater/AppUpdater';
 import { DiagnosticsService } from './diagnostics/DiagnosticsService';
+import { RealSpeedTester } from './diagnostics/RealSpeedTester';
+import { WarpService } from './warp/WarpService';
+import { CleanIpScanner } from './scanner/CleanIpScanner';
 import { ProtocolParser } from './protocol/parser';
 import { VpnServerConfig, AppSettings } from '../shared/types';
 
@@ -84,12 +87,16 @@ if (cachedServers.length === 0) {
 }
 
 function createWindow() {
+  const appIconPath = path.join(__dirname, '../../build/icon.ico');
+  const appIcon = nativeImage.createFromPath(appIconPath);
+
   mainWindow = new BrowserWindow({
     width: 1180,
     height: 780,
     minWidth: 960,
     minHeight: 650,
     frame: false,
+    icon: appIcon,
     backgroundColor: '#05070d',
     title: 'RYOX VPN',
     webPreferences: {
@@ -114,7 +121,8 @@ function createWindow() {
 
 // System Tray setup
 function createTray() {
-  const icon = nativeImage.createEmpty();
+  const iconPath = path.join(__dirname, '../../build/icon.ico');
+  const icon = nativeImage.createFromPath(iconPath);
   tray = new Tray(icon);
   tray.setToolTip('RYOX VPN — 100% Free Forever');
 
@@ -272,9 +280,26 @@ ipcMain.handle('settings:save', (_e, newSettings: AppSettings) => {
   return true;
 });
 
-// Diagnostics & Updates
+// Diagnostics, Speed Test, WARP & Scanner
 ipcMain.handle('diagnostics:run', async (_e, host?: string) => {
   return await DiagnosticsService.runDiagnostics(host);
+});
+ipcMain.handle('speedtest:run', async () => {
+  return await RealSpeedTester.testDownloadSpeed();
+});
+ipcMain.handle('warp:generate', async (_e, cleanIp?: string) => {
+  const profile = await WarpService.generateWarpProfile(cleanIp);
+  const current = storage.getServers();
+  storage.saveServers([profile, ...current]);
+  return profile;
+});
+ipcMain.handle('scanner:clean-ips', async () => {
+  return await CleanIpScanner.scan();
+});
+ipcMain.handle('servers:export', async () => {
+  const list = storage.getServers();
+  const uris = list.map(s => s.rawUri || `${s.protocol}://${s.server}:${s.port}#${encodeURIComponent(s.name)}`).join('\n');
+  return Buffer.from(uris).toString('base64');
 });
 ipcMain.handle('updates:check-app', async () => {
   return await AppUpdater.checkForUpdates();

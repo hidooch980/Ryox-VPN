@@ -1,0 +1,134 @@
+import { describe, it, expect } from 'vitest';
+import { WarpService } from '../src/main/warp/WarpService';
+import { CleanIpScanner } from '../src/main/scanner/CleanIpScanner';
+import { RealSpeedTester } from '../src/main/diagnostics/RealSpeedTester';
+import { SingBoxAdapter } from '../src/main/core/adapters/SingBoxAdapter';
+import { XrayAdapter } from '../src/main/core/adapters/XrayAdapter';
+import { VpnServerConfig, AppSettings } from '../src/shared/types';
+
+describe('New Advanced Features Test Suite', () => {
+  it('WarpService generates valid Curve25519 WireGuard profile with Clean IP', async () => {
+    const warp = await WarpService.generateWarpProfile('188.114.96.1');
+    expect(warp).toBeDefined();
+    expect(warp.protocol).toBe('wireguard');
+    expect(warp.core).toBe('sing-box');
+    expect(warp.server).toBe('188.114.96.1');
+    expect(warp.privateKey).toBeDefined();
+    expect(warp.privateKey?.length).toBeGreaterThan(20);
+    expect(warp.peerPublicKey).toBe('bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wMbgyo=');
+    expect(warp.address).toContain('172.16.0.2/32');
+  });
+
+  it('CleanIpScanner returns sorted IP latency list', async () => {
+    const results = await CleanIpScanner.scan(443, 200); // short timeout for testing
+    expect(Array.isArray(results)).toBe(true);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]).toHaveProperty('ip');
+    expect(results[0]).toHaveProperty('latencyMs');
+    expect(results[0]).toHaveProperty('status');
+  });
+
+  it('RealSpeedTester returns genuine download performance metrics', async () => {
+    const speed = await RealSpeedTester.testDownloadSpeed();
+    expect(speed).toBeDefined();
+    expect(speed.downloadMbps).toBeGreaterThan(0);
+    expect(speed.durationMs).toBeGreaterThan(0);
+    expect(speed.bytesReceived).toBeGreaterThan(0);
+  });
+
+  it('SingBoxAdapter injects TLS fragment configuration when enabled in settings', () => {
+    const server: VpnServerConfig = {
+      id: 'test-vless',
+      name: 'Test VLESS',
+      server: 'example.com',
+      port: 443,
+      protocol: 'vless',
+      core: 'sing-box',
+      uuid: '11111111-2222-3333-4444-555555555555',
+      tls: 'tls',
+      sni: 'example.com',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+
+    const settings: AppSettings = {
+      tunnelMode: 'TUN',
+      routingMode: 'Rule',
+      autoConnectOnLaunch: false,
+      startMinimized: false,
+      killSwitch: false,
+      dnsServers: ['1.1.1.1'],
+      customDnsEnabled: true,
+      dnsOverHttps: true,
+      dohUrl: 'https://1.1.1.1/dns-query',
+      activeCore: 'sing-box',
+      inboundHttpPort: 10809,
+      inboundSocksPort: 10808,
+      allowLan: false,
+      bypassChinaAndIranLan: true,
+      bypassPrivateIps: true,
+      theme: 'cyberpunk',
+      accentColor: '#00e5ff',
+      language: 'fa',
+      enableTlsFragment: true,
+      fragmentLength: '50-100',
+      fragmentInterval: '10-20'
+    };
+
+    const config: any = SingBoxAdapter.generateConfig(server, settings);
+    const proxyOut = config.outbounds.find((o: any) => o.tag === 'proxy');
+    expect(proxyOut.tls.fragment).toBeDefined();
+    expect(proxyOut.tls.fragment.enabled).toBe(true);
+    expect(proxyOut.tls.fragment.size).toBe('50-100');
+    expect(proxyOut.tls.fragment.sleep).toBe('10-20');
+  });
+
+  it('XrayAdapter injects dialerProxy fragment outbound when enabled', () => {
+    const server: VpnServerConfig = {
+      id: 'test-vless',
+      name: 'Test VLESS',
+      server: 'example.com',
+      port: 443,
+      protocol: 'vless',
+      core: 'xray',
+      uuid: '11111111-2222-3333-4444-555555555555',
+      tls: 'tls',
+      sni: 'example.com',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+
+    const settings: AppSettings = {
+      tunnelMode: 'TUN',
+      routingMode: 'Rule',
+      autoConnectOnLaunch: false,
+      startMinimized: false,
+      killSwitch: false,
+      dnsServers: ['1.1.1.1'],
+      customDnsEnabled: true,
+      dnsOverHttps: true,
+      dohUrl: 'https://1.1.1.1/dns-query',
+      activeCore: 'xray',
+      inboundHttpPort: 10809,
+      inboundSocksPort: 10808,
+      allowLan: false,
+      bypassChinaAndIranLan: true,
+      bypassPrivateIps: true,
+      theme: 'cyberpunk',
+      accentColor: '#00e5ff',
+      language: 'fa',
+      enableTlsFragment: true,
+      fragmentLength: '50-100',
+      fragmentInterval: '10-20'
+    };
+
+    const config: any = XrayAdapter.generateConfig(server, settings);
+    const proxyOut = config.outbounds.find((o: any) => o.tag === 'proxy');
+    expect(proxyOut.streamSettings.sockopt.dialerProxy).toBe('fragment');
+
+    const fragmentOut = config.outbounds.find((o: any) => o.tag === 'fragment');
+    expect(fragmentOut).toBeDefined();
+    expect(fragmentOut.settings.fragment.length).toBe('50-100');
+    expect(fragmentOut.settings.fragment.interval).toBe('10-20');
+  });
+});

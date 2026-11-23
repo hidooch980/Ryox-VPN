@@ -26,7 +26,7 @@ export class SingBoxAdapter {
     }
 
     const outbounds: any[] = [
-      this.buildOutbound(server),
+      this.buildOutbound(server, settings),
       {
         type: 'direct',
         tag: 'direct'
@@ -112,7 +112,7 @@ export class SingBoxAdapter {
     };
   }
 
-  private static buildOutbound(server: VpnServerConfig): any {
+  private static buildOutbound(server: VpnServerConfig, settings: AppSettings): any {
     const outbound: any = {
       tag: 'proxy',
       type: server.protocol === 'wireguard' ? 'wireguard' : server.protocol,
@@ -123,17 +123,17 @@ export class SingBoxAdapter {
     if (server.protocol === 'vless') {
       outbound.uuid = server.uuid;
       if (server.flow) outbound.flow = server.flow;
-      this.attachTls(outbound, server);
+      this.attachTls(outbound, server, settings);
       this.attachTransport(outbound, server);
     } else if (server.protocol === 'vmess') {
       outbound.uuid = server.uuid;
       outbound.security = 'auto';
       outbound.alter_id = 0;
-      this.attachTls(outbound, server);
+      this.attachTls(outbound, server, settings);
       this.attachTransport(outbound, server);
     } else if (server.protocol === 'trojan') {
       outbound.password = server.password;
-      this.attachTls(outbound, server);
+      this.attachTls(outbound, server, settings);
       this.attachTransport(outbound, server);
     } else if (server.protocol === 'shadowsocks') {
       outbound.method = server.method || 'aes-128-gcm';
@@ -168,7 +168,7 @@ export class SingBoxAdapter {
     return outbound;
   }
 
-  private static attachTls(outbound: any, server: VpnServerConfig): void {
+  private static attachTls(outbound: any, server: VpnServerConfig, settings: AppSettings): void {
     if (server.tls === 'reality') {
       outbound.tls = {
         enabled: true,
@@ -192,6 +192,14 @@ export class SingBoxAdapter {
           enabled: true,
           fingerprint: server.fingerprint || 'chrome'
         }
+      };
+    }
+
+    if (settings.enableTlsFragment && outbound.tls) {
+      outbound.tls.fragment = {
+        enabled: true,
+        size: settings.fragmentLength || '100-200',
+        sleep: settings.fragmentInterval || '10-20'
       };
     }
   }

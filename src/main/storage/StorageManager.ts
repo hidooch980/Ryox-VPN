@@ -38,7 +38,10 @@ export class StorageManager {
       bypassPrivateIps: true,
       theme: 'cyberpunk',
       accentColor: '#00e5ff',
-      language: 'fa'
+      language: 'fa',
+      enableTlsFragment: false,
+      fragmentLength: '100-200',
+      fragmentInterval: '10-20'
     };
 
     try {

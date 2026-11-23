@@ -66,6 +66,10 @@ export const electronApi = {
   runDiagnostics: (serverHost?: string): Promise<DiagnosticsResult> => 
     ipcRenderer.invoke('diagnostics:run', serverHost),
   checkForAppUpdates: () => ipcRenderer.invoke('updates:check-app'),
+  generateWarp: (cleanIp?: string): Promise<VpnServerConfig> => ipcRenderer.invoke('warp:generate', cleanIp),
+  scanCleanIps: (): Promise<any[]> => ipcRenderer.invoke('scanner:clean-ips'),
+  testDownloadSpeed: (): Promise<any> => ipcRenderer.invoke('speedtest:run'),
+  exportServers: (): Promise<string> => ipcRenderer.invoke('servers:export'),
 
   // Window Controls
   minimizeWindow: () => ipcRenderer.send('window:minimize'),

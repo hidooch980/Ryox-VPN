@@ -137,6 +137,9 @@ export interface AppSettings {
   theme: 'dark' | 'light' | 'cyberpunk';
   accentColor: string;
   language: 'en' | 'fa';
+  enableTlsFragment: boolean;
+  fragmentLength: string;
+  fragmentInterval: string;
 }
 
 export interface LiveStats {

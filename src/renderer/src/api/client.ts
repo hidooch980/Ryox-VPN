@@ -34,7 +34,10 @@ const mockSettings: AppSettings = {
   bypassPrivateIps: true,
   theme: 'cyberpunk',
   accentColor: '#00e5ff',
-  language: 'fa'
+  language: 'fa',
+  enableTlsFragment: false,
+  fragmentLength: '100-200',
+  fragmentInterval: '10-20'
 };
 
 let mockServers: VpnServerConfig[] = [
@@ -447,6 +450,54 @@ export const api = {
       changelog: 'You are on the latest official build of RYOX VPN v1.0.0.',
       hasUpdate: false
     };
+  },
+
+  async generateWarp(cleanIp?: string): Promise<VpnServerConfig> {
+    if (window.ryoxApi) return window.ryoxApi.generateWarp(cleanIp);
+    const mockWarp: VpnServerConfig = {
+      id: `mock-warp-${Date.now()}`,
+      name: `⚡ Cloudflare WARP (${cleanIp || '162.159.192.1'})`,
+      server: cleanIp || '162.159.192.1',
+      port: 2408,
+      protocol: 'wireguard',
+      core: 'sing-box',
+      privateKey: '2Gk...mock...Key=',
+      peerPublicKey: 'bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wMbgyo=',
+      address: ['172.16.0.2/32'],
+      latency: 32,
+      countryCode: 'CF',
+      countryName: 'Cloudflare Edge',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+    mockServers.unshift(mockWarp);
+    return mockWarp;
+  },
+
+  async scanCleanIps(): Promise<any[]> {
+    if (window.ryoxApi) return window.ryoxApi.scanCleanIps();
+    return [
+      { ip: '162.159.192.1', latencyMs: 29, status: 'FAST' },
+      { ip: '162.159.193.1', latencyMs: 34, status: 'FAST' },
+      { ip: '188.114.96.1', latencyMs: 41, status: 'FAST' },
+      { ip: '188.114.97.1', latencyMs: 45, status: 'FAST' },
+      { ip: '104.16.132.229', latencyMs: 82, status: 'MEDIUM' }
+    ];
+  },
+
+  async testDownloadSpeed(): Promise<any> {
+    if (window.ryoxApi) return window.ryoxApi.testDownloadSpeed();
+    return {
+      downloadMbps: 28.4,
+      downloadMBps: 3.55,
+      durationMs: 380,
+      bytesReceived: 500000
+    };
+  },
+
+  async exportServers(): Promise<string> {
+    if (window.ryoxApi) return window.ryoxApi.exportServers();
+    return Buffer.from(mockServers.map(s => s.rawUri || `${s.protocol}://${s.server}:${s.port}`).join('\n')).toString('base64');
   },
 
   minimize: () => window.ryoxApi?.minimizeWindow(),
