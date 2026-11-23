@@ -659,11 +659,25 @@ class RyoxVpnService : VpnService() {
                 .start()
 
             coreProcess = process
-            Log.i(TAG, "sing-box core started (pid=${process.pid()})")
+            Log.i(TAG, "sing-box core started (pid=${processPid(process)})")
             true
         } catch (e: Exception) {
             Log.e(TAG, "Error starting sing-box core: ${e.message}", e)
             false
+        }
+    }
+
+    /**
+     * `Process.pid()` only exists from Android API 36, so read the field the
+     * implementation exposes and fall back to a placeholder when it is absent.
+     */
+    private fun processPid(process: Process): String {
+        return try {
+            val field = process.javaClass.getDeclaredField("pid")
+            field.isAccessible = true
+            (field.get(process) as? Number)?.toString() ?: "unknown"
+        } catch (e: Exception) {
+            "unknown"
         }
     }
 
