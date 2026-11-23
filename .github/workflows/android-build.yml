@@ -42,9 +42,13 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Upload Debug APK
+      - name: Rename APK
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk android/app/build/outputs/apk/debug/RYOX-VPN-v1.0.0.apk
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Ryox-VPN-Debug-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: RYOX-VPN-v1.0.0-APK
+          path: android/app/build/outputs/apk/debug/RYOX-VPN-v1.0.0.apk
           if-no-files-found: error
