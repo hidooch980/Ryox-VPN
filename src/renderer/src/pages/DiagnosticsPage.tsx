@@ -6,6 +6,8 @@ import {
   Globe, 
   Server, 
   CheckCircle2, 
+  HelpCircle,
+  AlertTriangle,
   RefreshCw, 
   Gauge, 
   ArrowDownCircle, 
@@ -90,7 +92,13 @@ export const DiagnosticsPage: React.FC = () => {
           </button>
         </div>
 
-        {speedResult ? (
+        {speedResult && speedResult.measured === false ? (
+          <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 p-3.5 text-xs text-amber-300 leading-relaxed">
+            اندازه‌گیری سرعت دانلود ناموفق بود
+            {speedResult.reason ? ` (${speedResult.reason})` : ''}. عددی نمایش داده نمی‌شود، چون نشان دادن یک مقدار ساختگی
+            به‌جای سرعت واقعی گمراه‌کننده است. اتصال شبکه یا تونل را بررسی کنید و دوباره تلاش کنید.
+          </div>
+        ) : speedResult ? (
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 pt-1">
             <div className="p-3.5 rounded-xl bg-slate-950/70 border border-emerald-500/30">
               <span className="text-[10px] font-mono text-slate-400 uppercase">سرعت دانلود واقعی</span>
@@ -136,12 +144,12 @@ export const DiagnosticsPage: React.FC = () => {
               <Globe className="w-4 h-4 text-cyan-400" />
             </div>
             <div className="text-lg font-mono font-bold text-slate-100">
-              {result.currentPublicIp || '185.199.108.153'}
+              {result.currentPublicIp || '—'}
             </div>
             <div className="text-xs text-slate-400 flex items-center gap-2">
-              <span>کشور: <strong className="text-slate-200">{result.country || 'United States'}</strong></span>
+              <span>کشور: <strong className="text-slate-200">{result.country || 'نامشخص'}</strong></span>
               •
-              <span>ارائه‌دهنده (ISP): <strong className="text-slate-200">{result.isp || 'Cloud Provider'}</strong></span>
+              <span>ارائه‌دهنده (ISP): <strong className="text-slate-200">{result.isp || 'نامشخص'}</strong></span>
             </div>
           </div>
 
@@ -150,10 +158,22 @@ export const DiagnosticsPage: React.FC = () => {
               <span className="text-xs font-mono text-slate-400 uppercase">DNS Leak Audit (بررسی عدم نشت دی‌ان‌اس)</span>
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
             </div>
-            <div className="text-lg font-bold text-emerald-400 flex items-center gap-2">
-              <CheckCircle2 className="w-5 h-5" />
-              <span>امنیت کامل - بدون هیچ‌گونه نشت DNS</span>
-            </div>
+            {result.dnsLeakDetected === null ? (
+              <div className="text-lg font-bold text-amber-400 flex items-center gap-2">
+                <HelpCircle className="w-5 h-5" />
+                <span>بررسی نشده — نتیجه‌ای تأیید نمی‌شود</span>
+              </div>
+            ) : result.dnsLeakDetected ? (
+              <div className="text-lg font-bold text-rose-400 flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5" />
+                <span>نشت DNS شناسایی شد</span>
+              </div>
+            ) : (
+              <div className="text-lg font-bold text-emerald-400 flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5" />
+                <span>بدون نشت DNS</span>
+              </div>
+            )}
             <p className="text-xs text-slate-400">
               تمام پرس‌وجوهای DNS به‌صورت امن و رمزگذاری‌شده در داخل تونل هدایت می‌شوند.
             </p>
@@ -165,7 +185,7 @@ export const DiagnosticsPage: React.FC = () => {
               <Wifi className="w-4 h-4 text-purple-400" />
             </div>
             <div className="text-lg font-mono font-bold text-slate-100">
-              {result.tcpHandshakeMs} میلی‌ثانیه (ms)
+              {result.tcpHandshakeMs >= 0 ? `${result.tcpHandshakeMs} میلی‌ثانیه (ms)` : '— بدون پاسخ'}
             </div>
             <p className="text-xs text-slate-400">
               مدت زمان برقراری ارتباط سه مرحله‌ای سوکت TCP (SYN-ACK).

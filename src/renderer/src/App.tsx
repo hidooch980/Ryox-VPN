@@ -100,19 +100,47 @@ export const App: React.FC = () => {
       setLogs(prev => [entry, ...prev].slice(0, 500));
     });
 
+    // B7a: the main process pushes the merged server list after every
+    // background free-source fetch. Nothing listened for it before, so the new
+    // servers only appeared after a manual refresh.
+    const bridge = window.ryoxApi;
+    const unsubServers =
+      typeof bridge?.onServersUpdated === 'function'
+        ? bridge.onServersUpdated((updated: VpnServerConfig[]) => {
+            if (!Array.isArray(updated)) return;
+            setServers(updated);
+            setSelectedServer((prev) =>
+              updated.find((s) => s.id === prev?.id) ?? prev ?? updated[0]
+            );
+          })
+        : undefined;
+
     return () => {
       unsubState();
       unsubStats();
       unsubLog();
+      unsubServers?.();
     };
   }, []);
 
   const loadAllData = async () => {
     const srvs = await api.getServers();
     setServers(srvs);
-    if (srvs.length > 0 && !selectedServer) {
-      setSelectedServer(srvs[0]);
-    }
+
+    const st = await api.getSettings();
+    setSettings(st);
+
+    // S5: restore the persisted selection when that server still exists
+    // (current choice wins, then settings.selectedServerId, then the first
+    // server). Previously this always jumped back to srvs[0].
+    setSelectedServer((prev) => {
+      const candidates = [prev?.id, st.selectedServerId].filter(Boolean) as string[];
+      for (const id of candidates) {
+        const match = srvs.find((s) => s.id === id);
+        if (match) return match;
+      }
+      return srvs[0];
+    });
 
     const subs = await api.getSubscriptions();
     setSubscriptions(subs);
@@ -123,11 +151,20 @@ export const App: React.FC = () => {
     const crs = await api.getCores();
     setCores(crs);
 
-    const st = await api.getSettings();
-    setSettings(st);
-
     const liveSt = await api.getStats();
     setStats(liveSt);
+  };
+
+  // S5: remember the user's server choice across restarts.
+  const handleSelectServer = async (server: VpnServerConfig) => {
+    setSelectedServer(server);
+    try {
+      const latest = await api.getSettings();
+      await api.saveSettings({ ...latest, selectedServerId: server.id });
+      setSettings((prev) => ({ ...prev, selectedServerId: server.id }));
+    } catch {
+      // Non-fatal: the choice still applies for this session.
+    }
   };
 
   const handleConnectToggle = async () => {
@@ -187,7 +224,7 @@ export const App: React.FC = () => {
               selectedServer={selectedServer}
               settings={settings}
               onConnectToggle={handleConnectToggle}
-              onSelectServer={setSelectedServer}
+              onSelectServer={handleSelectServer}
               onNavigate={setActivePage}
             />
           )}
@@ -196,7 +233,7 @@ export const App: React.FC = () => {
             <ServersPage
               servers={servers}
               selectedServer={selectedServer}
-              onSelectServer={setSelectedServer}
+              onSelectServer={handleSelectServer}
               onRefreshServers={loadAllData}
             />
           )}
@@ -220,7 +257,7 @@ export const App: React.FC = () => {
             <WorldMapPage
               servers={servers}
               selectedServer={selectedServer}
-              onSelectServer={setSelectedServer}
+              onSelectServer={handleSelectServer}
             />
           )}
 

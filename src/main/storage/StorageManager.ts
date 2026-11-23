@@ -56,50 +56,107 @@ export class StorageManager {
   }
 
   public saveSettings(settings: AppSettings): void {
-    try {
-      fs.writeFileSync(this.settingsFile, JSON.stringify(settings, null, 2), 'utf-8');
-    } catch (e) {
-      console.error('[StorageManager] Failed to save settings:', e);
-    }
+    this.writeAtomic(this.settingsFile, JSON.stringify(settings, null, 2));
   }
 
+  /**
+   * Return stored servers, dropping any entry the adapters could not consume
+   * (missing host or an out-of-range port). A previously-corrupted file must never
+   * silently wipe the user's list — see readJsonArray.
+   */
   public getServers(): VpnServerConfig[] {
-    try {
-      if (fs.existsSync(this.serversFile)) {
-        const raw = fs.readFileSync(this.serversFile, 'utf-8');
-        return JSON.parse(raw);
-      }
-    } catch (e) {
-      console.warn('[StorageManager] Error reading servers:', e);
-    }
-    return [];
+    return this.readJsonArray<VpnServerConfig>(this.serversFile, '[StorageManager] servers')
+      .filter((server) => this.isUsableServer(server));
   }
 
   public saveServers(servers: VpnServerConfig[]): void {
-    try {
-      fs.writeFileSync(this.serversFile, JSON.stringify(servers, null, 2), 'utf-8');
-    } catch (e) {
-      console.error('[StorageManager] Failed to save servers:', e);
-    }
+    this.writeAtomic(this.serversFile, JSON.stringify(servers, null, 2));
   }
 
   public getSubscriptions(): Subscription[] {
-    try {
-      if (fs.existsSync(this.subscriptionsFile)) {
-        const raw = fs.readFileSync(this.subscriptionsFile, 'utf-8');
-        return JSON.parse(raw);
-      }
-    } catch (e) {
-      console.warn('[StorageManager] Error reading subscriptions:', e);
-    }
-    return [];
+    return this.readJsonArray<Subscription>(this.subscriptionsFile, '[StorageManager] subscriptions');
   }
 
   public saveSubscriptions(subs: Subscription[]): void {
+    this.writeAtomic(this.subscriptionsFile, JSON.stringify(subs, null, 2));
+  }
+
+  /** A node the adapters can actually consume: non-empty host and a real port. */
+  private isUsableServer(server: VpnServerConfig): boolean {
+    if (!server || typeof server !== 'object') return false;
+    if (typeof server.server !== 'string' || !server.server.trim()) return false;
+    return Number.isInteger(server.port) && server.port > 0 && server.port < 65536;
+  }
+
+  /**
+   * Atomically replace `file` with `data`: write a sibling `.tmp` first and rename it
+   * over the target (atomic on the same volume), so a crash mid-write cannot truncate
+   * the live file. The previous good contents are kept as `<file>.bak`.
+   */
+  private writeAtomic(file: string, data: string): void {
+    const tmp = `${file}.tmp`;
+    const backup = `${file}.bak`;
     try {
-      fs.writeFileSync(this.subscriptionsFile, JSON.stringify(subs, null, 2), 'utf-8');
+      fs.writeFileSync(tmp, data, 'utf-8');
+      if (fs.existsSync(file)) {
+        try {
+          fs.copyFileSync(file, backup);
+        } catch {
+          // Best effort — a missing backup must not block the write.
+        }
+      }
+      fs.renameSync(tmp, file);
     } catch (e) {
-      console.error('[StorageManager] Failed to save subscriptions:', e);
+      console.error(`[StorageManager] Failed to write ${file}:`, e);
+      try {
+        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+      } catch {
+        // Ignore cleanup failures.
+      }
     }
+  }
+
+  /**
+   * Read a JSON array, recovering from a corrupt file instead of silently wiping the
+   * user's data: the bad file is renamed to `<file>.corrupt-<timestamp>` and the last
+   * good `.bak` snapshot is restored when it exists.
+   */
+  private readJsonArray<T>(file: string, label: string): T[] {
+    if (!fs.existsSync(file)) return [];
+
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      if (Array.isArray(parsed)) return parsed as T[];
+      console.error(`${label}: ${file} did not contain a JSON array`);
+    } catch (e) {
+      console.error(`${label}: ${file} is corrupt:`, e);
+    }
+
+    // Quarantine the unreadable file so it is preserved rather than silently dropped.
+    const quarantined = `${file}.corrupt-${Date.now()}`;
+    try {
+      fs.renameSync(file, quarantined);
+      console.warn(`${label}: moved unreadable file to ${quarantined}`);
+    } catch (e) {
+      console.warn(`${label}: could not quarantine ${file}`, e);
+    }
+
+    const backup = `${file}.bak`;
+    if (fs.existsSync(backup)) {
+      try {
+        const parsedBackup = JSON.parse(fs.readFileSync(backup, 'utf-8'));
+        if (Array.isArray(parsedBackup)) {
+          // Restore the main file so later reads stay consistent.
+          this.writeAtomic(file, JSON.stringify(parsedBackup, null, 2));
+          console.warn(`${label}: recovered ${parsedBackup.length} entries from ${backup}`);
+          return parsedBackup as T[];
+        }
+      } catch (e) {
+        console.warn(`${label}: backup ${backup} is unusable:`, e);
+      }
+    }
+
+    console.error(`${label}: no usable backup for ${file}; returning an empty list`);
+    return [];
   }
 }

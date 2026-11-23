@@ -1,4 +1,5 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, execFile, ChildProcess } from 'child_process';
+import * as net from 'net';
 import * as path from 'path';
 import * as fs from 'fs';
 import { SupportedCore, VpnServerConfig, AppSettings, CoreMetadata } from '../../shared/types';
@@ -6,17 +7,60 @@ import { XrayAdapter } from './adapters/XrayAdapter';
 import { SingBoxAdapter } from './adapters/SingBoxAdapter';
 import { MihomoAdapter } from './adapters/MihomoAdapter';
 
+/**
+ * The binary file name a core id maps to. `SupportedCore` ids are used by the
+ * settings/UI, but upstream ships those cores under different names
+ * (`shadowsocks` → `sslocal`, `hysteria2` → `hysteria`), and looking up
+ * `shadowsocks.exe` made the app fall back to "virtual bridge mode" forever.
+ */
+const CORE_BINARY_NAMES: Record<string, string> = {
+  'sing-box': 'sing-box',
+  xray: 'xray',
+  mihomo: 'mihomo',
+  hysteria2: 'hysteria',
+  tuic: 'tuic',
+  wireguard: 'wireguard',
+  openvpn: 'openvpn',
+  shadowsocks: 'sslocal'
+};
+
+const READINESS_TIMEOUT_MS = 8000;
+const READINESS_POLL_MS = 200;
+const STOP_GRACE_MS = 2000;
+
+export interface CoreManagerOptions {
+  /**
+   * TEST-ONLY escape hatch. When the core binary is missing, report a
+   * successful start instead of failing.
+   *
+   * The real app must never use this: the connection manager treats a
+   * successful start as "the tunnel is up", points the Windows system proxy at
+   * `127.0.0.1:10808` and shows CONNECTED, while nothing is listening.
+   */
+  allowVirtualBridge?: boolean;
+  /** Extra directories to search for core binaries, searched first. */
+  binDirs?: string[];
+}
+
+function isTestEnvironment(): boolean {
+  return process.env.VITEST === 'true' || process.env.NODE_ENV === 'test';
+}
+
 export class CoreManager {
   private activeProcess: ChildProcess | null = null;
   private currentCore: SupportedCore | null = null;
   private baseBinDir: string;
   private configDir: string;
+  private options: CoreManagerOptions;
   private logCallback?: (level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG', msg: string) => void;
+  private exitCallback?: (code: number | null, signal: NodeJS.Signals | null) => void;
+  private virtualActive = false;
 
-  constructor(baseDir?: string) {
+  constructor(baseDir?: string, options: CoreManagerOptions = {}) {
     const root = baseDir || path.join(process.env.APPDATA || process.env.HOME || '.', '.ryox-vpn');
     this.baseBinDir = path.join(root, 'bin');
     this.configDir = path.join(root, 'configs');
+    this.options = options;
 
     if (!fs.existsSync(this.baseBinDir)) {
       fs.mkdirSync(this.baseBinDir, { recursive: true });
@@ -28,6 +72,15 @@ export class CoreManager {
 
   public setLogCallback(cb: (level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG', msg: string) => void): void {
     this.logCallback = cb;
+  }
+
+  /**
+   * Called when an already-started core process exits on its own (crash, or the
+   * user killing it in Task Manager). Without this the UI kept reporting
+   * CONNECTED while the system proxy pointed at a dead port.
+   */
+  public setExitCallback(cb?: (code: number | null, signal: NodeJS.Signals | null) => void): void {
+    this.exitCallback = cb;
   }
 
   private log(level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG', msg: string): void {
@@ -43,7 +96,7 @@ export class CoreManager {
       {
         id: 'sing-box',
         name: 'sing-box Core',
-        version: '1.11.0',
+        version: '1.14.4',
         installed: this.isBinaryPresent('sing-box'),
         status: this.isBinaryPresent('sing-box') ? 'Ready' : 'Missing',
         license: 'GPL-3.0',
@@ -55,7 +108,7 @@ export class CoreManager {
       {
         id: 'xray',
         name: 'Xray Core (Project X)',
-        version: '24.11.30',
+        version: '26.11.9',
         installed: this.isBinaryPresent('xray'),
         status: this.isBinaryPresent('xray') ? 'Ready' : 'Missing',
         license: 'MPL-2.0',
@@ -146,17 +199,64 @@ export class CoreManager {
 
   public getBinaryPath(coreName: string): string {
     const ext = process.platform === 'win32' ? '.exe' : '';
-    const userBin = path.join(this.baseBinDir, `${coreName}${ext}`);
-    if (fs.existsSync(userBin)) return userBin;
+    const fileName = `${CORE_BINARY_NAMES[coreName] || coreName}${ext}`;
 
-    const localBin = path.join(process.cwd(), 'bin', `${coreName}${ext}`);
-    if (fs.existsSync(localBin)) return localBin;
+    for (const dir of this.binSearchDirs()) {
+      const candidate = path.join(dir, fileName);
+      if (fs.existsSync(candidate)) return candidate;
+    }
 
-    return userBin;
+    return path.join(this.baseBinDir, fileName);
+  }
+
+  /**
+   * Where a core binary may live, in priority order:
+   *  1. explicit overrides (tests),
+   *  2. `%APPDATA%\.ryox-vpn\bin` — what `scripts/setup-cores.ps1` installs,
+   *  3. `<install>\resources\bin` — what electron-builder ships via extraResources,
+   *  4. `<repo>\bin` — development only.
+   *
+   * The packaged location used to be derived from `process.cwd()`, which is
+   * arbitrary when the app is started from a shortcut, so an installed copy
+   * never found its own bundled cores.
+   */
+  private binSearchDirs(): string[] {
+    const dirs: string[] = [];
+    if (this.options.binDirs) dirs.push(...this.options.binDirs);
+    dirs.push(this.baseBinDir);
+    dirs.push(this.resourcesBinDir());
+    if (!isTestEnvironment()) {
+      dirs.push(path.join(__dirname, '..', '..', '..', 'bin'));
+      dirs.push(path.join(process.cwd(), 'bin'));
+    }
+    return dirs;
+  }
+
+  private resourcesBinDir(): string {
+    const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+    if (typeof resourcesPath === 'string' && resourcesPath.length > 0) {
+      return path.join(resourcesPath, 'bin');
+    }
+    if (process.execPath) {
+      return path.join(path.dirname(process.execPath), 'resources', 'bin');
+    }
+    return path.join(__dirname, '..', '..', '..', 'bin');
+  }
+
+  private describeMissingBinary(binaryPath: string): string {
+    return (
+      `Core binary "${path.basename(binaryPath)}" is not installed (looked in ${this.binSearchDirs().join(', ')}). ` +
+      'Install the cores first: powershell -ExecutionPolicy Bypass -File scripts/setup-cores.ps1'
+    );
   }
 
   /**
    * Starts a VPN core with the given server configuration and app settings.
+   *
+   * Returns false — and logs exactly why — when the core cannot be started.
+   * It used to return true with no process at all when the binary was missing,
+   * so the connection manager reported CONNECTED while the system proxy pointed
+   * at a port nothing was listening on.
    */
   public async startCore(server: VpnServerConfig, settings: AppSettings): Promise<boolean> {
     if (this.activeProcess) {
@@ -164,116 +264,237 @@ export class CoreManager {
     }
 
     const preferredCore = server.core || settings.activeCore || 'sing-box';
-    this.currentCore = preferredCore;
+    const binaryPath = this.getBinaryPath(preferredCore);
 
-    // Generate config file
-    const configFile = path.join(this.configDir, `active_${preferredCore}.json`);
-    let args: string[] = [];
-
-    if (preferredCore === 'xray') {
-      const configObj = XrayAdapter.generateConfig(server, settings);
-      fs.writeFileSync(configFile, JSON.stringify(configObj, null, 2), 'utf-8');
-      args = ['run', '-c', configFile];
-    } else if (preferredCore === 'mihomo') {
-      const yamlFile = path.join(this.configDir, 'active_mihomo.yaml');
-      const yamlContent = MihomoAdapter.generateConfig(server, settings);
-      fs.writeFileSync(yamlFile, yamlContent, 'utf-8');
-      args = ['-d', this.configDir, '-f', yamlFile];
-    } else {
-      // Default fallback: sing-box (handles almost all protocols: VLESS, Hysteria2, TUIC, Shadowsocks, Wireguard, Trojan, etc.)
-      const configObj = SingBoxAdapter.generateConfig(server, settings);
-      fs.writeFileSync(configFile, JSON.stringify(configObj, null, 2), 'utf-8');
-      args = ['run', '-c', configFile];
+    if (!fs.existsSync(binaryPath)) {
+      if (this.options.allowVirtualBridge) {
+        this.log('WARN', `Core binary ${binaryPath} not installed. Running in virtual bridge mode (test-only).`);
+        this.currentCore = preferredCore;
+        this.virtualActive = true;
+        return true;
+      }
+      this.log('ERROR', this.describeMissingBinary(binaryPath));
+      this.currentCore = null;
+      this.virtualActive = false;
+      return false;
     }
 
-    const binaryPath = this.getBinaryPath(preferredCore);
+    // Build the config before spawning: an unsupported protocol/core pair now
+    // throws instead of producing a config the core will refuse to load.
+    let args: string[];
+    try {
+      args = this.writeCoreConfig(preferredCore, server, settings);
+    } catch (err) {
+      this.log('ERROR', `Cannot build a ${preferredCore} configuration: ${(err as Error).message}`);
+      this.currentCore = null;
+      return false;
+    }
+
+    this.currentCore = preferredCore;
     this.log('INFO', `Starting ${preferredCore} with target node: ${server.name} (${server.server}:${server.port})`);
 
-    // In production, if binary is missing, we log warning and fallback to system runner or mock connector for tests
-    if (!fs.existsSync(binaryPath)) {
-      this.log('WARN', `Core binary ${binaryPath} not installed. Running in virtual bridge mode.`);
-      return true;
-    }
+    const localPort = settings.inboundSocksPort || 10808;
 
-    return new Promise((resolve) => {
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      let reportedReady = false;
+      const finish = (ok: boolean): void => {
+        if (settled) return;
+        settled = true;
+        resolve(ok);
+      };
+
+      let proc: ChildProcess;
       try {
-        const proc = spawn(binaryPath, args, {
+        proc = spawn(binaryPath, args, {
           cwd: this.configDir,
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true
         });
-
-        this.activeProcess = proc;
-
-        proc.stdout?.on('data', (data) => {
-          this.log('DEBUG', data.toString().trim());
-        });
-
-        proc.stderr?.on('data', (data) => {
-          this.log('WARN', data.toString().trim());
-        });
-
-        proc.on('error', (err) => {
-          this.log('ERROR', `Process execution error: ${err.message}`);
-          this.activeProcess = null;
-          resolve(false);
-        });
-
-        proc.on('exit', (code, signal) => {
-          this.log('INFO', `Process exited with code ${code}, signal: ${signal}`);
-          this.activeProcess = null;
-        });
-
-        // Give process 500ms to spin up and check for early crash
-        setTimeout(() => {
-          if (this.activeProcess && !this.activeProcess.killed) {
-            this.log('INFO', `Core ${preferredCore} successfully started and active.`);
-            resolve(true);
-          } else {
-            resolve(false);
-          }
-        }, 500);
-
-      } catch (err: any) {
-        this.log('ERROR', `Failed to spawn ${preferredCore}: ${err.message}`);
+      } catch (err) {
+        this.log('ERROR', `Failed to spawn ${preferredCore}: ${(err as Error).message}`);
+        this.currentCore = null;
         resolve(false);
+        return;
       }
+
+      this.activeProcess = proc;
+      this.virtualActive = false;
+
+      proc.stdout?.on('data', (data) => {
+        this.log('DEBUG', data.toString().trim());
+      });
+
+      proc.stderr?.on('data', (data) => {
+        this.log('WARN', data.toString().trim());
+      });
+
+      proc.on('error', (err) => {
+        this.log('ERROR', `Process execution error: ${err.message}`);
+        if (this.activeProcess === proc) {
+          this.activeProcess = null;
+          this.currentCore = null;
+        }
+        finish(false);
+      });
+
+      proc.on('exit', (code, signal) => {
+        this.log('INFO', `Process exited with code ${code}, signal: ${signal}`);
+        const wasActive = this.activeProcess === proc;
+        if (wasActive) {
+          this.activeProcess = null;
+          this.currentCore = null;
+        }
+        finish(false);
+        // A core that dies after a successful start must not leave the UI
+        // reporting CONNECTED while the tunnel is gone.
+        if (reportedReady && wasActive) {
+          this.exitCallback?.(code, signal);
+        }
+      });
+
+      void this.waitForListeningPort(localPort, READINESS_TIMEOUT_MS).then((listening) => {
+        if (settled) return;
+        if (!listening) {
+          this.log('ERROR', `${preferredCore} never started listening on 127.0.0.1:${localPort} — shutting it down.`);
+          void this.stopCore();
+          finish(false);
+          return;
+        }
+        if (proc.exitCode !== null) {
+          finish(false);
+          return;
+        }
+        reportedReady = true;
+        this.log('INFO', `Core ${preferredCore} is listening on 127.0.0.1:${localPort} — tunnel engine ready.`);
+        finish(true);
+      });
+    });
+  }
+
+  /** Writes the core's config file and returns the CLI arguments for it. */
+  private writeCoreConfig(core: SupportedCore, server: VpnServerConfig, settings: AppSettings): string[] {
+    const configFile = path.join(this.configDir, `active_${core}.json`);
+
+    if (core === 'xray') {
+      fs.writeFileSync(configFile, JSON.stringify(XrayAdapter.generateConfig(server, settings), null, 2), 'utf-8');
+      return ['run', '-c', configFile];
+    }
+
+    if (core === 'mihomo') {
+      const yamlFile = path.join(this.configDir, 'active_mihomo.yaml');
+      fs.writeFileSync(yamlFile, MihomoAdapter.generateConfig(server, settings), 'utf-8');
+      return ['-d', this.configDir, '-f', yamlFile];
+    }
+
+    // Default: sing-box (handles VLESS, Hysteria2, TUIC, Shadowsocks, Wireguard, Trojan, ...)
+    fs.writeFileSync(configFile, JSON.stringify(SingBoxAdapter.generateConfig(server, settings), null, 2), 'utf-8');
+    return ['run', '-c', configFile];
+  }
+
+  /**
+   * Waits until something accepts a TCP connection on the local inbound port.
+   *
+   * "the process is still alive after 500 ms" was never a readiness signal: a
+   * core with a rejected config, or one that cannot bind its port, was reported
+   * as a successful start, and the user got a green UI and no internet.
+   */
+  private waitForListeningPort(port: number, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+
+    return new Promise<boolean>((resolve) => {
+      const attempt = (): void => {
+        const socket = net.createConnection({ host: '127.0.0.1', port });
+
+        const retry = (): void => {
+          socket.destroy();
+          if (Date.now() >= deadline) resolve(false);
+          else setTimeout(attempt, READINESS_POLL_MS);
+        };
+
+        socket.setTimeout(1000);
+        socket.once('connect', () => {
+          socket.destroy();
+          resolve(true);
+        });
+        socket.once('error', retry);
+        socket.once('timeout', retry);
+      };
+
+      attempt();
     });
   }
 
   /**
    * Gracefully terminate the running core.
+   *
+   * On Windows `kill()` is `TerminateProcess`, which leaves no chance for a
+   * graceful TUN teardown, so the process tree is force-killed as a fallback:
+   * `proc.killed` is set to true by `kill()` itself, which made the old
+   * SIGKILL escalation unreachable and could leave a child core behind holding
+   * the inbound ports the next core needs.
    */
   public async stopCore(): Promise<void> {
-    if (!this.activeProcess) return;
-
-    this.log('INFO', `Stopping active core (${this.currentCore})...`);
     const proc = this.activeProcess;
     this.activeProcess = null;
     this.currentCore = null;
+    this.virtualActive = false;
 
-    return new Promise((resolve) => {
-      try {
-        proc.kill('SIGTERM');
-        const timeout = setTimeout(() => {
-          if (!proc.killed) {
-            proc.kill('SIGKILL');
-          }
-          resolve();
-        }, 2000);
+    if (!proc || proc.exitCode !== null) return;
 
-        proc.on('exit', () => {
-          clearTimeout(timeout);
-          resolve();
-        });
-      } catch {
+    this.log('INFO', 'Stopping active core...');
+
+    await new Promise<void>((resolve) => {
+      let done = false;
+      const finish = (): void => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
         resolve();
+      };
+
+      const timer = setTimeout(() => {
+        if (proc.exitCode === null) {
+          void this.forceKillTree(proc);
+        }
+        // Give the force-kill a moment, then stop waiting no matter what:
+        // a wedged process must not block the disconnect path.
+        setTimeout(finish, 1000);
+      }, STOP_GRACE_MS);
+
+      proc.once('exit', finish);
+
+      try {
+        proc.kill();
+      } catch {
+        finish();
       }
     });
   }
 
+  /** Last resort: `taskkill /T /F` so no orphan child keeps the ports open. */
+  private async forceKillTree(proc: ChildProcess): Promise<void> {
+    const pid = proc.pid;
+    if (!pid) return;
+
+    this.log('WARN', `Core process ${pid} did not exit — force-killing its process tree.`);
+
+    await new Promise<void>((resolve) => {
+      if (process.platform === 'win32') {
+        execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => resolve());
+        return;
+      }
+      try {
+        proc.kill('SIGKILL');
+      } catch {
+        // already gone
+      }
+      resolve();
+    });
+  }
+
   public isRunning(): boolean {
-    return this.activeProcess !== null;
+    return this.activeProcess !== null || this.virtualActive;
   }
 
   public getRunningCore(): SupportedCore | null {

@@ -34,3 +34,6 @@ jobs:
 
       - name: Verify Electron Main Compilation
         run: npm run build:electron
+
+      - name: Validate Generated Core Configs
+        run: npm run validate:cores

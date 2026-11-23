@@ -1,3 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- allowBackup is off in the manifest; these excludes are the belt-and-braces
+     guard for device-to-device transfer, which is governed separately. -->
 <full-backup-content>
+    <!-- holds the sing-box node password and the subscription URLs -->
+    <exclude domain="sharedpref" path="ryox_vpn_prefs.xml" />
+    <!-- generated config / core log, both contain node credentials -->
+    <exclude domain="file" path="singbox.json" />
+    <exclude domain="file" path="singbox.log" />
 </full-backup-content>

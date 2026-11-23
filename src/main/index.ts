@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, powerMonitor } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { StorageManager } from './storage/StorageManager';
@@ -11,11 +11,13 @@ import { DiagnosticsService } from './diagnostics/DiagnosticsService';
 import { RealSpeedTester } from './diagnostics/RealSpeedTester';
 import { WarpService } from './warp/WarpService';
 import { CleanIpScanner } from './scanner/CleanIpScanner';
-import { ProtocolParser } from './protocol/parser';
-import { VpnServerConfig, AppSettings } from '../shared/types';
+import { ProtocolParser, dedupeServers } from './protocol/parser';
+import { VpnServerConfig, AppSettings, SupportedCore } from '../shared/types';
+import { CoreUpdater } from './updater/CoreUpdater';
 import { AutoSubscribeService } from './subscription/AutoSubscribeService';
 import { SmartConnectService } from './vpn/SmartConnectService';
 import { KillSwitchService } from './security/KillSwitchService';
+import { SystemProxyManager } from './vpn/SystemProxyManager';
 import { KillSwitch } from './vpn/KillSwitch';
 
 let mainWindow: BrowserWindow | null = null;
@@ -36,13 +38,41 @@ function resolveBuildAsset(fileName: string): string {
 }
 
 const storage = new StorageManager();
+
+/**
+ * Launch-time snapshot ONLY. It is captured before the window exists and is
+ * read for values that genuinely must be frozen at startup
+ * (`settings.startMinimized`, `settings.autoConnectOnLaunch`) and to seed the
+ * VPN manager. Every IPC handler must read `storage.getSettings()` instead:
+ * values such as `activeCore`/`killSwitch` change at runtime, and using this
+ * snapshot there would, for example, whitelist the wrong core binary in the
+ * kill-switch firewall rule after the user switches cores.
+ */
 const settings = storage.getSettings();
 const coreManager = new CoreManager();
 const vpnManager = new VpnConnectionManager(coreManager, settings);
 const freeSources = new FreeSourceDiscovery();
-const subManager = new SubscriptionManager();
+// Shares the app's StorageManager; its constructor hydrates the persisted
+// subscription list (falling back to a starter sample only on first run).
+const subManager = new SubscriptionManager(storage);
 const autoSubscribeService = new AutoSubscribeService();
 const killSwitchService = new KillSwitchService();
+
+/**
+ * Structured result of the `cores:update` IPC call. `installed` is only ever
+ * true when this process actually downloaded and installed a binary — the
+ * handler currently only queries the upstream release, so it stays false and
+ * `message` says so instead of pretending an update happened.
+ */
+export interface CoreUpdateResult {
+  coreId: string;
+  status: 'up-to-date' | 'update-available' | 'unknown-core' | 'network-error';
+  currentVersion?: string;
+  latestVersion?: string;
+  downloadUrl?: string;
+  installed: boolean;
+  message: string;
+}
 
 // Seed verified real servers if storage is empty or contains legacy placeholders
 let cachedServers = storage.getServers();
@@ -62,7 +92,6 @@ if (cachedServers.length <= 3 || cachedServers.some(s => s.server.includes('ryox
       rawUri: 'ss://YWVzLTI1Ni1nY206WlJwZ2FCZUd4dEVOSVhndmhwa1pCS3o5R25XUlMyZFljeDlPK2EyaXdOND0=@45.86.51.18:19999#US-45.86.51.18',
       countryCode: 'US',
       countryName: 'United States',
-      latency: 30,
       isFavorite: true,
       createdAt: Date.now(),
       updatedAt: Date.now()
@@ -81,7 +110,6 @@ if (cachedServers.length <= 3 || cachedServers.some(s => s.server.includes('ryox
       rawUri: 'ss://YWVzLTI1Ni1nY206WlJwZ2FCZUd4dEVOSVhndmhwa1pCS3o5R25XUlMyZFljeDlPK2EyaXdOND0=@185.230.230.18:19999#DE-185.230.230.18',
       countryCode: 'DE',
       countryName: 'Germany',
-      latency: 48,
       isFavorite: true,
       createdAt: Date.now(),
       updatedAt: Date.now()
@@ -100,7 +128,6 @@ if (cachedServers.length <= 3 || cachedServers.some(s => s.server.includes('ryox
       rawUri: 'ss://YWVzLTI1Ni1nY206WlJwZ2FCZUd4dEVOSVhndmhwa1pCS3o5R25XUlMyZFljeDlPK2EyaXdOND0=@95.215.201.18:19999#NL-95.215.201.18',
       countryCode: 'NL',
       countryName: 'Netherlands',
-      latency: 33,
       isFavorite: true,
       createdAt: Date.now(),
       updatedAt: Date.now()
@@ -118,7 +145,6 @@ if (cachedServers.length <= 3 || cachedServers.some(s => s.server.includes('ryox
       tls: 'none',
       countryCode: 'FR',
       countryName: 'France',
-      latency: 42,
       isFavorite: false,
       createdAt: Date.now(),
       updatedAt: Date.now()
@@ -136,7 +162,6 @@ if (cachedServers.length <= 3 || cachedServers.some(s => s.server.includes('ryox
       tls: 'none',
       countryCode: 'US',
       countryName: 'United States',
-      latency: 55,
       isFavorite: false,
       createdAt: Date.now(),
       updatedAt: Date.now()
@@ -154,7 +179,6 @@ if (cachedServers.length <= 3 || cachedServers.some(s => s.server.includes('ryox
       sni: 'courses.browseseniorrolesandenhanceyourcareertoday.com',
       countryCode: 'US',
       countryName: 'United States',
-      latency: 35,
       isFavorite: false,
       createdAt: Date.now(),
       updatedAt: Date.now()
@@ -170,7 +194,6 @@ if (cachedServers.length <= 3 || cachedServers.some(s => s.server.includes('ryox
       address: ['172.16.0.2/32'],
       countryCode: 'CF',
       countryName: 'Cloudflare Anycast',
-      latency: 28,
       isFavorite: true,
       createdAt: Date.now(),
       updatedAt: Date.now()
@@ -323,6 +346,21 @@ app.whenReady().then(() => {
   // machine could still be blocked from the network while RYOX is not running.
   void KillSwitch.disarm();
 
+  // Crash recovery for the system proxy: if the app was killed while the proxy
+  // was set, the OS keeps pointing at our loopback port and the user has no
+  // internet until the next connect. Idempotent, and it only touches a proxy
+  // that is one of our own loopback ports.
+  void SystemProxyManager.restoreOnStartup();
+
+  // Waking from sleep can leave a dead tunnel behind while the UI still says
+  // CONNECTED. Re-verify the local endpoint and tear the session down honestly
+  // when it no longer answers, instead of showing a green badge over nothing.
+  powerMonitor.on('resume', () => {
+    void vpnManager.handleResume();
+  });
+
+  // Intentionally the launch-time snapshot: whether the window opens hidden is
+  // decided once, before the user can change any setting.
   // "Start minimized to system tray" only makes sense when a tray exists.
   const startHidden = settings.startMinimized && canCreateTray();
   createWindow({ hidden: startHidden });
@@ -333,6 +371,8 @@ app.whenReady().then(() => {
     else mainWindow?.show();
   });
 
+  // Also the launch-time snapshot on purpose: auto-connect is a startup
+  // decision and must not flip mid-session.
   if (settings.autoConnectOnLaunch) {
     // Let the renderer attach its IPC listeners before dialing out.
     setTimeout(() => {
@@ -447,25 +487,37 @@ ipcMain.handle('servers:parse-uri', (_e, uri: string) => {
   return ProtocolParser.parseUri(uri);
 });
 
-// Subscriptions
+// Subscriptions — every mutation is persisted through StorageManager (they
+// used to live only in SubscriptionManager's memory and vanished on restart),
+// and each handler returns the persisted subscriptions list.
 ipcMain.handle('subscriptions:get', () => subManager.getSubscriptions());
 ipcMain.handle('subscriptions:add', (_e, name: string, url: string, interval: number) => {
-  return subManager.addSubscription(name, url, interval);
+  subManager.addSubscription(name, url, interval);
+  const persisted = subManager.getSubscriptions();
+  storage.saveSubscriptions(persisted);
+  return persisted;
 });
 ipcMain.handle('subscriptions:update', async (_e, id: string) => {
-  const servers = await subManager.updateSubscription(id);
-  if (servers.length > 0) {
-    const existing = storage.getServers();
-    const updated = existing.filter(s => s.subscriptionId !== id).concat(servers);
-    storage.saveServers(updated);
-  }
-  return servers;
+  const fresh = dedupeServers(await subManager.updateSubscription(id));
+
+  // Replace (not merely append) this subscription's stored nodes with the fresh,
+  // deduplicated set. `replaceSubscriptionServers` prunes the old ones first, so a
+  // refresh that yields nothing no longer leaves stale endpoints behind.
+  subManager.replaceSubscriptionServers(id, fresh);
+
+  const persisted = subManager.getSubscriptions();
+  storage.saveSubscriptions(persisted);
+  return persisted;
 });
 ipcMain.handle('subscriptions:remove', (_e, id: string) => {
+  // removeSubscription already prunes this subscription's servers internally;
+  // the explicit calls below keep the IPC layer's persistence contract obvious.
   subManager.removeSubscription(id);
-  const servers = storage.getServers().filter(s => s.subscriptionId !== id);
-  storage.saveServers(servers);
-  return true;
+  subManager.pruneSubscriptionServers(id);
+
+  const persisted = subManager.getSubscriptions();
+  storage.saveSubscriptions(persisted);
+  return persisted;
 });
 
 // Free Sources Discovery
@@ -474,10 +526,11 @@ ipcMain.handle('sources:fetch-all', async () => {
   const result = await freeSources.fetchAllEnabled();
   if (result.servers.length > 0) {
     const existing = storage.getServers();
-    // Merge without duplicates
+    // Merge without duplicates: the host:port filter keeps an endpoint from being
+    // re-added, and dedupeServers drops duplicate ids inside the fetched batch.
     const existingIds = new Set(existing.map(s => `${s.server}:${s.port}`));
     const newOnes = result.servers.filter(s => !existingIds.has(`${s.server}:${s.port}`));
-    storage.saveServers([...existing, ...newOnes]);
+    storage.saveServers(dedupeServers([...existing, ...newOnes]));
   }
   return result;
 });
@@ -488,7 +541,45 @@ ipcMain.handle('sources:toggle', (_e, id: string, enabled: boolean) => {
 
 // Cores & Settings
 ipcMain.handle('cores:get', () => coreManager.getCoresMetadata());
-ipcMain.handle('cores:update', async (_e, _coreId: string) => true);
+ipcMain.handle('cores:update', async (_e, coreId: string): Promise<CoreUpdateResult> => {
+  const core = coreId as SupportedCore;
+  const metadata = coreManager.getCoresMetadata().find(c => c.id === core);
+  if (!metadata) {
+    return {
+      coreId,
+      status: 'unknown-core',
+      installed: false,
+      message: `Unknown core "${coreId}".`
+    };
+  }
+
+  // Only the upstream release lookup is real. Downloading and installing a
+  // binary archive is not implemented in this build, so `installed` stays
+  // false and the message never claims an update was applied.
+  const release = await CoreUpdater.fetchLatestCoreRelease(core);
+  if (!release) {
+    return {
+      coreId,
+      status: 'network-error',
+      currentVersion: metadata.version,
+      installed: false,
+      message: `Could not reach the upstream release for ${metadata.name} (offline, rate-limited, or no matching asset).`
+    };
+  }
+
+  const upToDate = metadata.version === release.version;
+  return {
+    coreId,
+    status: upToDate ? 'up-to-date' : 'update-available',
+    currentVersion: metadata.version,
+    latestVersion: release.version,
+    downloadUrl: release.downloadUrl,
+    installed: false,
+    message: upToDate
+      ? `${metadata.name} is up to date (v${release.version}).`
+      : `${metadata.name} has upstream v${release.version} (installed: v${metadata.version}). Download/install is not implemented in this build.`
+  };
+});
 ipcMain.handle('settings:get', () => storage.getSettings());
 ipcMain.handle('settings:save', async (_e, newSettings: AppSettings) => {
   const previous = vpnManager.getSettings();
@@ -497,11 +588,26 @@ ipcMain.handle('settings:save', async (_e, newSettings: AppSettings) => {
 
   // Apply the kill-switch toggle immediately instead of waiting for the next
   // connection, so "ARMED" in the UI matches the firewall's actual state.
-  if (Boolean(newSettings.killSwitch) !== Boolean(previous.killSwitch)) {
-    killSwitchService.setCoreBinaryPath(coreManager.getBinaryPath(newSettings.activeCore));
+  // `newSettings` is always live (it is the payload being saved); the core-path
+  // re-arm below also covers switching the active core while armed, which would
+  // otherwise leave the rule whitelisting the previous executable.
+  const killSwitchChanged = Boolean(newSettings.killSwitch) !== Boolean(previous.killSwitch);
+  const coreChanged = newSettings.activeCore !== previous.activeCore;
+  const state = vpnManager.getState();
+  const tunnelUp = state === 'CONNECTED' || state === 'VERIFYING';
+
+  if (killSwitchChanged || (coreChanged && newSettings.killSwitch)) {
     if (newSettings.killSwitch) {
-      const armed = await killSwitchService.enable();
-      vpnManager.setKillSwitchArmed(armed);
+      // Arming while disconnected installs a block-all rule with no tunnel to
+      // carry traffic, which takes the machine offline. Persist the preference
+      // (done above) and let the connect path arm it instead.
+      if (tunnelUp) {
+        killSwitchService.setCoreBinaryPath(coreManager.getBinaryPath(newSettings.activeCore));
+        const armed = await killSwitchService.enable();
+        vpnManager.setKillSwitchArmed(armed);
+      } else {
+        console.log(`[killswitch] Preference enabled but VPN is ${state}; will arm on connect.`);
+      }
     } else {
       await killSwitchService.disable();
       vpnManager.setKillSwitchArmed(false);
@@ -604,7 +710,19 @@ ipcMain.handle('autosub:fetch', async () => {
 // ── Kill Switch ───────────────────────────────────────────────────────────────
 ipcMain.handle('killswitch:enable', async () => {
   try {
-    killSwitchService.setCoreBinaryPath(coreManager.getBinaryPath(settings.activeCore));
+    // Live settings, not the module-load snapshot: the active core (and so the
+    // executable the firewall must allow) can change while the app runs.
+    const liveSettings = storage.getSettings();
+    const state = vpnManager.getState();
+    if (state !== 'CONNECTED' && state !== 'VERIFYING') {
+      // Blocking all outbound traffic with no tunnel up would disconnect the
+      // machine. Defer: the preference is already persisted and the connect
+      // path arms the kill switch.
+      console.log(`[killswitch] Enable requested while VPN is ${state}; deferring until connected.`);
+      return false;
+    }
+
+    killSwitchService.setCoreBinaryPath(coreManager.getBinaryPath(liveSettings.activeCore));
     return await killSwitchService.enable();
   } catch (err) {
     console.error('[IPC killswitch:enable] Error:', err);

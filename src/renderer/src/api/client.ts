@@ -62,18 +62,33 @@ if (typeof window !== 'undefined' && (window as any).AndroidBridge && !window.ry
     removeSubscription: async (id: string) => {
       try { return bridge.removeSubscription(id); } catch { return false; }
     },
-    getSources: async () => {
+    // Names here must match what `api.*` below calls through `window.ryoxApi`.
+    getFreeSources: async () => {
       try { return JSON.parse(bridge.getSources()); } catch { return []; }
     },
-    fetchAllSources: async () => {
-      try { return JSON.parse(bridge.fetchAllSources()); } catch { return { successCount: 0, servers: [] }; }
+    fetchAllFreeSources: async () => {
+      try {
+        const res = JSON.parse(bridge.fetchAllSources());
+        const servers = res && Array.isArray(res.servers) ? res.servers : [];
+        const totalRaw = res && typeof res.totalRaw === 'number'
+          ? res.totalRaw
+          : (res && typeof res.successCount === 'number' ? res.successCount : servers.length);
+        return { servers, totalRaw };
+      } catch { return { servers: [], totalRaw: 0 }; }
     },
-    toggleSource: async (id: string, enabled: boolean) => {
-      try { return bridge.toggleSource(id, enabled); } catch { return false; }
+    toggleFreeSource: async (id: string, enabled: boolean) => {
+      try { return Boolean(bridge.toggleSource(id, enabled)); } catch { return false; }
     },
-    getCoresMetadata: async () => {
+    getCores: async () => {
       try { return JSON.parse(bridge.getCoresMetadata()); } catch { return []; }
     },
+    // Android ships as an APK signed by the same key; there is no in-app updater,
+    // so report that honestly instead of throwing.
+    checkForAppUpdates: async () => ({
+      version: '1.0.0',
+      hasUpdate: false,
+      changelog: 'In-app updates are not available on the Android build. Install a newer RYOX VPN APK to update.'
+    }),
     getSettings: async () => {
       try { return JSON.parse(bridge.getSettings()); } catch { return null; }
     },
@@ -105,10 +120,10 @@ if (typeof window !== 'undefined' && (window as any).AndroidBridge && !window.ry
       try { return JSON.parse(bridge.fetchAutoSub()); } catch { return []; }
     },
     enableKillSwitch: async () => {
-      try { return bridge.enableKillSwitch(); } catch {}
+      try { return Boolean(bridge.enableKillSwitch()); } catch { return false; }
     },
     disableKillSwitch: async () => {
-      try { return bridge.disableKillSwitch(); } catch {}
+      try { return Boolean(bridge.disableKillSwitch()); } catch { return false; }
     },
     onStateChanged: (cb: any) => {
       window._onAndroidStateChanged = cb;
@@ -543,14 +558,13 @@ export const api = {
 
   async runDiagnostics(host?: string): Promise<DiagnosticsResult> {
     if (window.ryoxApi) return window.ryoxApi.runDiagnostics(host);
+    // Browser mock: this build has no TUN adapter and no probing engine, so the
+    // result must not claim verified measurements (-1 / null = not measured).
     return {
-      dnsLeakDetected: false,
-      currentPublicIp: '185.199.108.153',
-      country: 'United States',
-      isp: 'Fastly CDN Edge',
-      pingLatency: 42,
-      tcpHandshakeMs: 48,
-      tunAdapterStatus: 'Active',
+      dnsLeakDetected: null,
+      pingLatency: -1,
+      tcpHandshakeMs: -1,
+      tunAdapterStatus: 'Inactive',
       timestamp: Date.now()
     };
   },

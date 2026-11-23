@@ -1,7 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- allowBackup is off in the manifest; these excludes stop the credentials in
+     ryox_vpn_prefs (password, subscription URLs) and the generated sing-box
+     config/log from leaving the device through transfer as well. -->
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="sharedpref" path="ryox_vpn_prefs.xml" />
+        <exclude domain="file" path="singbox.json" />
+        <exclude domain="file" path="singbox.log" />
     </cloud-backup>
     <device-transfer>
+        <exclude domain="sharedpref" path="ryox_vpn_prefs.xml" />
+        <exclude domain="file" path="singbox.json" />
+        <exclude domain="file" path="singbox.log" />
     </device-transfer>
 </data-extraction-rules>

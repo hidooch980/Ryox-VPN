@@ -2,13 +2,14 @@ import { KillSwitch } from '../vpn/KillSwitch';
 
 /**
  * Thin façade over {@link KillSwitch} kept for the `killswitch:enable` /
- * `killswitch:disable` IPC surface.
+ * `killswitch:disable` IPC surface. It holds no logic of its own.
  *
- * Historically this class installed its own firewall rules that blocked *all*
- * outbound traffic while only allowing the local proxy ports. That also blocked
- * the VPN core's own connection to the remote node, so enabling the kill switch
- * tore the tunnel down. There is now a single implementation: the rules created
- * by `KillSwitch`, which exempt the core process, the TUN adapter and loopback.
+ * The single implementation lives in `KillSwitch`: while armed, the Windows
+ * Firewall *default* policy becomes `blockinbound,blockoutbound` and explicit
+ * allow rules exempt the VPN core process, the TUN adapter and loopback.
+ * (The older design installed an explicit `action=block` catch-all rule, which
+ * Windows evaluates before allow rules, so the exemptions were inert and the
+ * core could not reach the node at all.)
  */
 export class KillSwitchService {
   /** Path of the VPN core executable to exempt from the block rule. */

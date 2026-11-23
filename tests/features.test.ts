@@ -28,13 +28,25 @@ describe('New Advanced Features Test Suite', () => {
     expect(results[0]).toHaveProperty('status');
   });
 
-  it('RealSpeedTester returns genuine download performance metrics', async () => {
+  it('RealSpeedTester reports a real measurement or an honest failure — never an invented number', async () => {
     const speed = await RealSpeedTester.testDownloadSpeed();
+
     expect(speed).toBeDefined();
-    expect(speed.downloadMbps).toBeGreaterThan(0);
-    expect(speed.durationMs).toBeGreaterThan(0);
-    expect(speed.bytesReceived).toBeGreaterThan(0);
-  });
+
+    if (speed.measured) {
+      expect(speed.downloadMbps).toBeGreaterThan(0);
+      expect(speed.downloadMBps).toBeGreaterThan(0);
+      expect(speed.durationMs).toBeGreaterThan(0);
+      expect(speed.bytesReceived).toBeGreaterThan(0);
+    } else {
+      // A measurement that could not be taken must be reported as zero with a
+      // reason, instead of the fabricated "18.5 Mbps" the old code returned.
+      expect(speed.downloadMbps).toBe(0);
+      expect(speed.downloadMBps).toBe(0);
+      expect(speed.bytesReceived).toBe(0);
+      expect(speed.reason).toBeTruthy();
+    }
+  }, 30000);
 
   it('SingBoxAdapter injects TLS fragment configuration when enabled in settings', () => {
     const server: VpnServerConfig = {
@@ -77,10 +89,14 @@ describe('New Advanced Features Test Suite', () => {
 
     const config: any = SingBoxAdapter.generateConfig(server, settings);
     const proxyOut = config.outbounds.find((o: any) => o.tag === 'proxy');
-    expect(proxyOut.tls.fragment).toBeDefined();
-    expect(proxyOut.tls.fragment.enabled).toBe(true);
-    expect(proxyOut.tls.fragment.size).toBe('50-100');
-    expect(proxyOut.tls.fragment.sleep).toBe('10-20');
+    // sing-box 1.12+ replaced the `tls.fragment` object with a boolean
+    // `record_fragment` switch; the object is now rejected by `sing-box check`
+    // ("cannot unmarshal object into Go struct field
+    // OutboundTLSOptions.tls.fragment"). fragmentLength/fragmentInterval are no
+    // longer expressible in the sing-box TLS object, so only the switch is
+    // asserted here.
+    expect(proxyOut.tls.record_fragment).toBe(true);
+    expect(proxyOut.tls.fragment).toBeUndefined();
   });
 
   it('XrayAdapter injects dialerProxy fragment outbound when enabled', () => {

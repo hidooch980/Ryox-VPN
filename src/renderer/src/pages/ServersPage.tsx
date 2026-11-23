@@ -67,13 +67,21 @@ export const ServersPage: React.FC<ServersPageProps> = ({
 
   const handlePingAll = async () => {
     setIsPingingAll(true);
-    for (const server of filtered) {
-      const ping = await api.pingServer(server);
-      server.latency = ping > 0 ? ping : -1;
-      await api.saveServer(server);
+    try {
+      for (const server of filtered) {
+        const ping = await api.pingServer(server);
+        server.latency = ping > 0 ? ping : -1;
+        await api.saveServer(server);
+      }
+    } catch (err: any) {
+      // A rejected ping used to skip setIsPingingAll(false) entirely, leaving
+      // the spinner running and the "test ping all" button dead for good.
+      setExportNotice(`❌ خطا در تست پینگ سرورها: ${err?.message ?? err}`);
+      setTimeout(() => setExportNotice(null), 5000);
+    } finally {
+      setIsPingingAll(false);
+      onRefreshServers();
     }
-    setIsPingingAll(false);
-    onRefreshServers();
   };
 
   const handleToggleFavorite = async (server: VpnServerConfig) => {

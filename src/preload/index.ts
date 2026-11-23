@@ -10,6 +10,20 @@ import {
   DiagnosticsResult 
 } from '../shared/types';
 
+/**
+ * Mirrors `CoreUpdateResult` in `src/main/index.ts` (the main process is the
+ * only place allowed to define it; the renderer keeps a structural copy).
+ */
+export interface CoreUpdateResult {
+  coreId: string;
+  status: 'up-to-date' | 'update-available' | 'unknown-core' | 'network-error';
+  currentVersion?: string;
+  latestVersion?: string;
+  downloadUrl?: string;
+  installed: boolean;
+  message: string;
+}
+
 export const electronApi = {
   // VPN control
   connect: (server: VpnServerConfig) => ipcRenderer.invoke('vpn:connect', server),
@@ -33,6 +47,16 @@ export const electronApi = {
     ipcRenderer.on('vpn:log', handler);
     return () => ipcRenderer.removeListener('vpn:log', handler);
   },
+  /**
+   * Background free-source fetches push the merged server list with this event.
+   * Without a listener the new servers only appeared after a manual refresh.
+   * The callback receives the fresh list so the renderer can use it directly.
+   */
+  onServersUpdated: (callback: (servers: VpnServerConfig[]) => void) => {
+    const handler = (_event: IpcRendererEvent, servers: VpnServerConfig[]) => callback(servers);
+    ipcRenderer.on('servers-updated', handler);
+    return () => ipcRenderer.removeListener('servers-updated', handler);
+  },
 
   // Server management
   getServers: (): Promise<VpnServerConfig[]> => ipcRenderer.invoke('servers:get'),
@@ -41,12 +65,13 @@ export const electronApi = {
   pingServer: (server: VpnServerConfig): Promise<number> => ipcRenderer.invoke('servers:ping', server),
   parseUri: (uri: string): Promise<VpnServerConfig | null> => ipcRenderer.invoke('servers:parse-uri', uri),
 
-  // Subscription management
+  // Subscription management — mutations persist in the main process and always
+  // resolve to the persisted list.
   getSubscriptions: (): Promise<Subscription[]> => ipcRenderer.invoke('subscriptions:get'),
-  addSubscription: (name: string, url: string, interval: number): Promise<Subscription> => 
+  addSubscription: (name: string, url: string, interval: number): Promise<Subscription[]> => 
     ipcRenderer.invoke('subscriptions:add', name, url, interval),
-  updateSubscription: (id: string): Promise<VpnServerConfig[]> => ipcRenderer.invoke('subscriptions:update', id),
-  removeSubscription: (id: string) => ipcRenderer.invoke('subscriptions:remove', id),
+  updateSubscription: (id: string): Promise<Subscription[]> => ipcRenderer.invoke('subscriptions:update', id),
+  removeSubscription: (id: string): Promise<Subscription[]> => ipcRenderer.invoke('subscriptions:remove', id),
 
   // Free Sources Discovery
   getFreeSources: (): Promise<FreeConfigSource[]> => ipcRenderer.invoke('sources:get'),
@@ -56,7 +81,7 @@ export const electronApi = {
 
   // Cores
   getCores: (): Promise<CoreMetadata[]> => ipcRenderer.invoke('cores:get'),
-  updateCore: (coreId: string) => ipcRenderer.invoke('cores:update', coreId),
+  updateCore: (coreId: string): Promise<CoreUpdateResult> => ipcRenderer.invoke('cores:update', coreId),
 
   // Settings
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),

@@ -1,5 +1,5 @@
 import { FreeConfigSource, VpnServerConfig, SupportedProtocol } from '../../shared/types';
-import { ProtocolParser } from '../protocol/parser';
+import { ProtocolParser, dedupeServers } from '../protocol/parser';
 
 export class FreeSourceDiscovery {
   private sources: FreeConfigSource[] = [];
@@ -98,7 +98,7 @@ export class FreeSourceDiscovery {
       }
 
       const text = await response.text();
-      const parsedConfigs = ProtocolParser.parseSubscription(text, source.id);
+      const parsedConfigs = dedupeServers(ProtocolParser.parseSubscription(text, source.id));
 
       source.lastSync = Date.now();
       source.serverCount = parsedConfigs.length;
@@ -111,7 +111,9 @@ export class FreeSourceDiscovery {
   }
 
   /**
-   * Fetch all enabled sources, deduplicate servers by IP/Port, and return unique list
+   * Fetch all enabled sources and return unique servers. Deduplication keys on the
+   * stable node id (which hashes the endpoint and secret) with a `server:port:protocol`
+   * fallback, so nodes sharing a host but differing in secret are both kept.
    */
   public async fetchAllEnabled(): Promise<{ servers: VpnServerConfig[]; totalRaw: number }> {
     const allServers: VpnServerConfig[] = [];
@@ -123,17 +125,9 @@ export class FreeSourceDiscovery {
     }
 
     const totalRaw = allServers.length;
-    const uniqueMap = new Map<string, VpnServerConfig>();
-
-    for (const s of allServers) {
-      const key = `${s.server}:${s.port}:${s.protocol}`;
-      if (!uniqueMap.has(key)) {
-        uniqueMap.set(key, s);
-      }
-    }
 
     return {
-      servers: Array.from(uniqueMap.values()),
+      servers: dedupeServers(allServers),
       totalRaw
     };
   }

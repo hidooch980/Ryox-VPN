@@ -1,12 +1,18 @@
 import * as net from 'net';
+import * as os from 'os';
 import { DiagnosticsResult } from '../../shared/types';
 
 export class DiagnosticsService {
   /**
-   * Run full network diagnostics suite
+   * Run full network diagnostics suite.
+   *
+   * Everything reported here is measured. The previous version invented values
+   * when a probe failed (`pingLatency: 45`, `tcpHandshakeMs: 52`,
+   * `tunAdapterStatus: 'Active'`, the IP `185.199.108.153`/Fastly and
+   * `dnsLeakDetected: false`), so a completely broken tunnel still produced a
+   * full green report.
    */
   public static async runDiagnostics(serverHost?: string, serverPort: number = 443): Promise<DiagnosticsResult> {
-    const startPing = Date.now();
     let tcpHandshakeMs = -1;
 
     if (serverHost) {
@@ -16,13 +22,17 @@ export class DiagnosticsService {
     const ipInfo = await this.fetchPublicIpInfo();
 
     return {
-      dnsLeakDetected: false,
+      // This service cannot prove that resolver traffic stays inside the tunnel,
+      // so it reports "not verified" rather than a reassuring `false`.
+      dnsLeakDetected: null,
       currentPublicIp: ipInfo.ip,
       country: ipInfo.country,
       isp: ipInfo.isp,
-      pingLatency: tcpHandshakeMs > 0 ? tcpHandshakeMs : 45,
-      tcpHandshakeMs: tcpHandshakeMs > 0 ? tcpHandshakeMs : 52,
-      tunAdapterStatus: 'Active',
+      // -1 means "not measured" and the UI renders it as unknown; it must never
+      // be replaced by a plausible-looking constant.
+      pingLatency: tcpHandshakeMs,
+      tcpHandshakeMs,
+      tunAdapterStatus: this.detectTunAdapter(),
       timestamp: Date.now()
     };
   }
@@ -34,11 +44,17 @@ export class DiagnosticsService {
 
       socket.setTimeout(timeoutMs);
 
-      socket.connect(port, host, () => {
-        const ms = Date.now() - start;
+      try {
+        socket.connect(port, host, () => {
+          const ms = Date.now() - start;
+          socket.destroy();
+          resolve(ms);
+        });
+      } catch {
         socket.destroy();
-        resolve(ms);
-      });
+        resolve(-1);
+        return;
+      }
 
       socket.on('error', () => {
         socket.destroy();
@@ -52,6 +68,20 @@ export class DiagnosticsService {
     });
   }
 
+  /**
+   * Looks for the virtual adapter the cores create (`ryox-tun`), which is the
+   * only honest way to tell whether the tunnel interface exists right now.
+   */
+  private static detectTunAdapter(): 'Active' | 'Inactive' | 'Error' {
+    try {
+      const names = Object.keys(os.networkInterfaces());
+      const tun = names.find((name) => /ryox[-_]?tun|wintun|sing-?box|tun\d*/i.test(name));
+      return tun ? 'Active' : 'Inactive';
+    } catch {
+      return 'Error';
+    }
+  }
+
   private static async fetchPublicIpInfo(): Promise<{ ip?: string; country?: string; isp?: string }> {
     try {
       const res = await fetch('https://ipapi.co/json/', {
@@ -59,20 +89,18 @@ export class DiagnosticsService {
       });
       if (res.ok) {
         const data = await res.json();
-        return {
-          ip: data.ip,
-          country: data.country_name || data.country,
-          isp: data.org
-        };
+        if (data?.ip) {
+          return {
+            ip: data.ip,
+            country: data.country_name || data.country,
+            isp: data.org
+          };
+        }
       }
     } catch {
-      // Fallback
+      // Reported as unknown below — never replaced by a hardcoded address.
     }
 
-    return {
-      ip: '185.199.108.153',
-      country: 'United States',
-      isp: 'Fastly CDN'
-    };
+    return {};
   }
 }

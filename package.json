@@ -20,6 +20,9 @@
     "dist": "electron-builder",
     "test": "vitest run",
     "test:watch": "vitest",
+    "validate:cores": "node scripts/validate-core-configs.js",
+    "android:assets": "node scripts/sync-android-assets.js",
+    "setup:cores": "powershell -ExecutionPolicy Bypass -File scripts/setup-cores.ps1",
     "start": "electron ."
   },
   "dependencies": {

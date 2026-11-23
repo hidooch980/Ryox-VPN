@@ -6,12 +6,26 @@ bin/*.exe
 bin/*.dll
 bin/*.dat
 .gradle/
-# Build outputs only — NOTE: build/ at the repo root holds the committed app
-# icon (build/icon.ico), which electron-builder and the tray icon depend on.
+# Everything under build/ is a local build artifact. The two committed
+# exceptions are the app icons, which electron-builder (extraResources) and the
+# tray/window icon depend on.
+build/*
+!build/icon.ico
+!build/icon.png
 android/build/
-build/outputs/
 android/app/build/
 android/.gradle/
+# Vendored Android core build inputs. The native library that actually ships is
+# android/app/src/main/jniLibs/arm64-v8a/libsingbox.so; the upstream release
+# archive and its extracted copy are duplicate bytes and stay out of git
+# (re-fetch with scripts/setup-cores.ps1 if the .so must be rebuilt).
+singbox-arm64.tar.gz
+sing-box-1.10.7-android-arm64/sing-box
+# Local-only tooling state
+.dsh-meow/
+.sharrowkin/
+temp_zip/
+*.lnk
 *.log
 .env
 .DS_Store

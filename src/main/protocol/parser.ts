@@ -41,13 +41,9 @@ export class ProtocolParser {
 
     let content = rawContent.trim();
 
-    // Check if content is Base64 encoded
-    if (!content.includes('://') && !content.includes('proxies:') && !content.includes('{') && this.isBase64(content)) {
-      try {
-        content = Buffer.from(content, 'base64').toString('utf-8');
-      } catch {
-        // Not valid base64, continue with raw
-      }
+    // Check if content is Base64 encoded (standard or URL-safe, padded or unpadded)
+    if (!content.includes('://') && !content.includes('proxies:') && !content.includes('{')) {
+      content = ProtocolParser.decodeBase64Payload(content);
     }
 
     // Check if YAML (Clash / Mihomo)
@@ -84,7 +80,8 @@ export class ProtocolParser {
     const uuid = url.username;
     const server = url.hostname;
     const port = parseInt(url.port, 10);
-    const name = decodeURIComponent(url.hash.replace(/^#/, '')) || `VLESS-${server}:${port}`;
+    if (!this.isValidPort(port)) return null;
+    const name = this.safeDecode(url.hash.replace(/^#/, '')) || `VLESS-${server}:${port}`;
 
     const params = url.searchParams;
     const network = (params.get('type') || 'tcp') as 'tcp' | 'ws' | 'grpc' | 'http';
@@ -138,6 +135,7 @@ export class ProtocolParser {
     const obj = JSON.parse(decodedJson);
     const server = obj.add;
     const port = parseInt(obj.port, 10);
+    if (!this.isValidPort(port)) return null;
     const uuid = obj.id;
     const name = obj.ps || `VMess-${server}:${port}`;
     const network = (obj.net || 'tcp') as 'tcp' | 'ws' | 'grpc' | 'http';
@@ -170,7 +168,8 @@ export class ProtocolParser {
     const password = url.username;
     const server = url.hostname;
     const port = parseInt(url.port, 10);
-    const name = decodeURIComponent(url.hash.replace(/^#/, '')) || `Trojan-${server}:${port}`;
+    if (!this.isValidPort(port)) return null;
+    const name = this.safeDecode(url.hash.replace(/^#/, '')) || `Trojan-${server}:${port}`;
 
     const params = url.searchParams;
     const sni = params.get('sni') || params.get('peer') || server;
@@ -203,42 +202,54 @@ export class ProtocolParser {
     let name = '';
     const hashIndex = clean.indexOf('#');
     if (hashIndex !== -1) {
-      name = decodeURIComponent(clean.substring(hashIndex + 1));
+      name = this.safeDecode(clean.substring(hashIndex + 1));
       clean = clean.substring(0, hashIndex);
     }
 
-    let method = '';
-    let password = '';
+    let method: string | undefined;
+    let password: string | undefined;
     let server = '';
     let port = 0;
 
     if (clean.includes('@')) {
-      const [userinfo, hostport] = clean.split('@');
-      let decodedUserinfo = userinfo;
-      if (this.isBase64(userinfo)) {
-        decodedUserinfo = Buffer.from(userinfo, 'base64').toString('utf-8');
-      }
-      const [m, p] = decodedUserinfo.split(':');
-      method = m;
-      password = p;
+      const atIdx = clean.indexOf('@');
+      const userinfo = clean.substring(0, atIdx);
+      const hostport = clean.substring(atIdx + 1);
 
-      const [h, pt] = hostport.split(':');
-      server = h;
-      port = parseInt(pt, 10);
+      // The userinfo is usually base64(method:password); accept URL-safe and
+      // unpadded variants as well as plain (non-encoded) method:password.
+      const decodedUserinfo = this.tryDecodeBase64(userinfo) ?? userinfo;
+
+      // Split on the FIRST colon so passwords may themselves contain ':'.
+      const sepIdx = decodedUserinfo.indexOf(':');
+      if (sepIdx === -1) return null;
+      method = decodedUserinfo.substring(0, sepIdx);
+      password = decodedUserinfo.substring(sepIdx + 1);
+
+      const portSepIdx = hostport.lastIndexOf(':');
+      if (portSepIdx === -1) return null;
+      server = hostport.substring(0, portSepIdx);
+      port = parseInt(hostport.substring(portSepIdx + 1), 10);
     } else {
-      const decoded = Buffer.from(clean, 'base64').toString('utf-8');
+      const decoded = this.tryDecodeBase64(clean);
+      if (decoded === null) return null;
       const atIdx = decoded.indexOf('@');
-      if (atIdx !== -1) {
-        const [m, p] = decoded.substring(0, atIdx).split(':');
-        method = m;
-        password = p;
-        const [h, pt] = decoded.substring(atIdx + 1).split(':');
-        server = h;
-        port = parseInt(pt, 10);
-      }
+      if (atIdx === -1) return null;
+
+      const userinfo = decoded.substring(0, atIdx);
+      const sepIdx = userinfo.indexOf(':');
+      if (sepIdx === -1) return null;
+      method = userinfo.substring(0, sepIdx);
+      password = userinfo.substring(sepIdx + 1);
+
+      const hostport = decoded.substring(atIdx + 1);
+      const portSepIdx = hostport.lastIndexOf(':');
+      if (portSepIdx === -1) return null;
+      server = hostport.substring(0, portSepIdx);
+      port = parseInt(hostport.substring(portSepIdx + 1), 10);
     }
 
-    if (!server || !port) return null;
+    if (!method || password === undefined || !server || !this.isValidPort(port)) return null;
     if (!name) name = `SS-${server}:${port}`;
 
     return {
@@ -264,7 +275,8 @@ export class ProtocolParser {
     const password = url.username;
     const server = url.hostname;
     const port = parseInt(url.port, 10);
-    const name = decodeURIComponent(url.hash.replace(/^#/, '')) || `Hysteria2-${server}:${port}`;
+    if (!this.isValidPort(port)) return null;
+    const name = this.safeDecode(url.hash.replace(/^#/, '')) || `Hysteria2-${server}:${port}`;
     const params = url.searchParams;
 
     return {
@@ -291,7 +303,8 @@ export class ProtocolParser {
     const password = url.password;
     const server = url.hostname;
     const port = parseInt(url.port, 10);
-    const name = decodeURIComponent(url.hash.replace(/^#/, '')) || `TUIC-${server}:${port}`;
+    if (!this.isValidPort(port)) return null;
+    const name = this.safeDecode(url.hash.replace(/^#/, '')) || `TUIC-${server}:${port}`;
     const params = url.searchParams;
 
     return {
@@ -318,7 +331,8 @@ export class ProtocolParser {
     const privateKey = url.username;
     const server = url.hostname;
     const port = parseInt(url.port, 10);
-    const name = decodeURIComponent(url.hash.replace(/^#/, '')) || `WireGuard-${server}:${port}`;
+    if (!this.isValidPort(port)) return null;
+    const name = this.safeDecode(url.hash.replace(/^#/, '')) || `WireGuard-${server}:${port}`;
     const params = url.searchParams;
 
     return {
@@ -347,9 +361,12 @@ export class ProtocolParser {
 
       for (const p of doc.proxies) {
         if (!p.type || !p.server || !p.port) continue;
-        const proto = p.type.toLowerCase() as SupportedProtocol;
+        const rawType = String(p.type).toLowerCase();
+        // Clash uses short aliases that the adapters do not understand.
+        const proto = (rawType === 'ss' ? 'shadowsocks' : rawType === 'socks' ? 'socks5' : rawType) as SupportedProtocol;
         const server = String(p.server);
         const port = Number(p.port);
+        if (!this.isValidPort(port)) continue;
         const name = p.name || `${p.type}-${server}:${port}`;
 
         const config: VpnServerConfig = {
@@ -358,7 +375,7 @@ export class ProtocolParser {
           server,
           port,
           protocol: proto,
-          core: (proto === 'vless' || proto === 'vmess' || proto === 'trojan') ? 'xray' : 'sing-box',
+          core: ['vless', 'vmess', 'trojan', 'shadowsocks'].includes(proto) ? 'xray' : 'sing-box',
           uuid: p.uuid,
           password: p.password,
           method: p.cipher,
@@ -424,15 +441,60 @@ export class ProtocolParser {
     return results;
   }
 
-  private static isBase64(str: string): boolean {
-    if (!str || str.length % 4 !== 0 || /[^A-Za-z0-9+/=]/.test(str)) {
-      return false;
-    }
+  /** A valid TCP/UDP port: an integer in 1..65535. */
+  private static isValidPort(port: number): boolean {
+    return Number.isInteger(port) && port > 0 && port < 65536;
+  }
+
+  /** decodeURIComponent that never throws on malformed input (e.g. a literal "%"). */
+  private static safeDecode(value: string): string {
     try {
-      return Buffer.from(str, 'base64').toString('base64') === str;
+      return decodeURIComponent(value);
     } catch {
-      return false;
+      return value;
     }
+  }
+
+  /**
+   * Strip whitespace, normalise URL-safe characters to the standard alphabet and
+   * pad to a multiple of 4, so unpadded / URL-safe payloads decode correctly.
+   */
+  private static normalizeBase64(value: string): string {
+    const stripped = value.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
+    const remainder = stripped.length % 4;
+    if (remainder === 1) return '';
+    return remainder === 0 ? stripped : stripped + '='.repeat(4 - remainder);
+  }
+
+  /**
+   * Leniently decode base64 (standard or URL-safe, padded or unpadded).
+   * Returns null when the input is not canonical base64.
+   */
+  public static tryDecodeBase64(value: string): string | null {
+    if (!value) return null;
+    const normalized = ProtocolParser.normalizeBase64(value);
+    if (!normalized || !/^[A-Za-z0-9+/]+={0,2}$/.test(normalized)) return null;
+    try {
+      const decoded = Buffer.from(normalized, 'base64').toString('utf-8');
+      if (!decoded) return null;
+      const reencoded = Buffer.from(decoded, 'utf-8').toString('base64').replace(/=+$/, '');
+      if (reencoded !== normalized.replace(/=+$/, '')) return null;
+      return decoded;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Decode a whole subscription body when it is base64 encoded, otherwise return
+   * it unchanged. Shared with AutoSubscribeService so both paths stay equally lenient.
+   */
+  public static decodeBase64Payload(raw: string): string {
+    const decoded = ProtocolParser.tryDecodeBase64(raw);
+    if (decoded && (decoded.includes('://') || decoded.includes('proxies:') || decoded.includes('{'))) {
+      return decoded;
+    }
+    return raw;
   }
 
   private static generateId(proto: string, server: string, port: number, secret?: string): string {
@@ -444,4 +506,21 @@ export class ProtocolParser {
     }
     return `ryox-${proto}-${Math.abs(hash).toString(16)}`;
   }
+}
+
+/**
+ * Deduplicate servers by their stable `id` (which already hashes the endpoint and
+ * secret), falling back to `server:port:protocol` when an id is missing. This keeps
+ * distinct nodes that share a host but differ in secret/user instead of collapsing them.
+ */
+export function dedupeServers(servers: VpnServerConfig[]): VpnServerConfig[] {
+  const seen = new Set<string>();
+  const unique: VpnServerConfig[] = [];
+  for (const server of servers) {
+    const key = server.id || `${server.server}:${server.port}:${server.protocol}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(server);
+  }
+  return unique;
 }

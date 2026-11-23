@@ -53,6 +53,12 @@ export interface VpnServerConfig {
   alpn?: string[];
   flow?: string;           // xtls-rprx-vision
   fingerprint?: string;    // chrome, safari, etc.
+  /**
+   * Skip TLS certificate verification. Most free public nodes use self-signed
+   * certificates, an IP as SNI, or an expired cert, and every one of them fails
+   * the handshake without this. Comes from `insecure=1` / `allowInsecure=1`.
+   */
+  allowInsecure?: boolean;
   
   // Reality
   publicKey?: string;      // Reality public key
@@ -179,11 +185,18 @@ export interface LogEntry {
 }
 
 export interface DiagnosticsResult {
-  dnsLeakDetected: boolean;
+  /**
+   * `true` = a leak was detected, `false` = verified clean, `null` = NOT
+   * verified. The service has no way to prove that DNS queries never escape the
+   * tunnel, so it reports null instead of claiming "no leak" unconditionally.
+   */
+  dnsLeakDetected: boolean | null;
   currentPublicIp?: string;
   country?: string;
   isp?: string;
+  /** -1 when the probe did not complete (no fake latency numbers). */
   pingLatency: number;
+  /** -1 when the probe did not complete. */
   tcpHandshakeMs: number;
   tunAdapterStatus: 'Active' | 'Inactive' | 'Error';
   timestamp: number;

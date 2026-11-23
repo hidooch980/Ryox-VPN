@@ -8,6 +8,7 @@ import { DiagnosticsService } from '../diagnostics/DiagnosticsService';
 
 const PING_INTERVAL_TICKS = 5;
 const PING_TIMEOUT_MS = 2000;
+const LOCAL_ENDPOINT_TIMEOUT_MS = 5000;
 
 export class VpnConnectionManager extends EventEmitter {
   private state: ConnectionState = 'DISCONNECTED';
@@ -16,7 +17,7 @@ export class VpnConnectionManager extends EventEmitter {
   private settings: AppSettings;
   private sessionStartTime: number = 0;
   private statsTimer?: NodeJS.Timeout;
-  
+
   // Real-time telemetry counters
   private totalUploadBytes: number = 0;
   private totalDownloadBytes: number = 0;
@@ -33,10 +34,20 @@ export class VpnConnectionManager extends EventEmitter {
   private pingInFlight = false;
   private killSwitchArmed = false;
 
+  /**
+   * Monotonic token identifying the current connection attempt. Every `await`
+   * in `connect()` re-checks it, so a disconnect (or a second, faster connect)
+   * during the handshake aborts the stale attempt instead of letting it finish
+   * with a phantom CONNECTED state and an armed system proxy.
+   */
+  private attempt = 0;
+
   constructor(coreManager: CoreManager, settings: AppSettings) {
     super();
     this.coreManager = coreManager;
     this.settings = settings;
+    // A core that dies on its own must not leave the UI reporting CONNECTED.
+    this.coreManager.setExitCallback((code, signal) => this.handleCoreExit(code, signal));
   }
 
   public getState(): ConnectionState {
@@ -68,10 +79,20 @@ export class VpnConnectionManager extends EventEmitter {
     this.emit('log', level, this.sanitizeLog(msg));
   }
 
+  private isCurrent(attemptToken: number): boolean {
+    return attemptToken === this.attempt;
+  }
+
   public async connect(server: VpnServerConfig): Promise<boolean> {
     if (this.state === 'CONNECTING' || this.state === 'CONNECTED') {
       await this.disconnect();
     }
+
+    // Snapshot the settings for this attempt: `settings:save` swaps the shared
+    // object, and re-reading it after an await used to combine a new active core
+    // with a config generated from the previous one.
+    const settings: AppSettings = { ...this.settings };
+    const myAttempt = ++this.attempt;
 
     this.setState('CONNECTING');
     this.activeServer = server;
@@ -80,25 +101,40 @@ export class VpnConnectionManager extends EventEmitter {
     this.currentPing = 0;
     this.emitLog('INFO', `Initiating connection to ${server.name} via ${server.protocol.toUpperCase()}...`);
 
+    const localPort = settings.inboundSocksPort || 10808;
+
     try {
       // Step 1: Start the Core process
-      const started = await this.coreManager.startCore(server, this.settings);
+      const started = await this.coreManager.startCore(server, settings);
+      if (!this.isCurrent(myAttempt)) return false;
       if (!started) {
-        this.emitLog('ERROR', `Failed to start VPN engine for ${server.protocol}`);
+        this.emitLog(
+          'ERROR',
+          `Failed to start the ${server.core || settings.activeCore} VPN engine. ` +
+            'See the log above for the engine\'s own error.'
+        );
         this.setState('ERROR');
         return false;
       }
 
       // Step 2: Configure System Proxy if in SystemProxy mode
-      if (this.settings.tunnelMode === 'SystemProxy') {
-        this.emitLog('INFO', `Applying Windows system proxy on port ${this.settings.inboundSocksPort || 10808}...`);
-        await SystemProxyManager.enableProxy(this.settings.inboundSocksPort || 10808);
+      if (settings.tunnelMode === 'SystemProxy') {
+        this.emitLog('INFO', `Applying Windows system proxy on port ${localPort}...`);
+        const applied = await SystemProxyManager.enableProxy(localPort);
+        if (!this.isCurrent(myAttempt)) return false;
+        if (!applied) {
+          this.emitLog('ERROR', 'Could not apply the Windows system proxy; refusing to report a connected tunnel.');
+          await this.teardown();
+          this.setState('ERROR');
+          return false;
+        }
       }
 
       // Step 3: Arm KillSwitch if enabled
-      if (this.settings.killSwitch) {
+      if (settings.killSwitch) {
         this.emitLog('INFO', 'Arming traffic leak protection (Kill Switch)...');
-        const armed = await KillSwitch.arm(this.coreManager.getBinaryPath(server.core || this.settings.activeCore));
+        const armed = await KillSwitch.arm(this.coreManager.getBinaryPath(server.core || settings.activeCore));
+        if (!this.isCurrent(myAttempt)) return false;
         this.killSwitchArmed = armed;
         if (armed) {
           this.emitLog('INFO', 'Kill Switch armed: outbound traffic is restricted to the VPN core.');
@@ -111,13 +147,19 @@ export class VpnConnectionManager extends EventEmitter {
         }
       }
 
-      // Step 4: VERIFYING state — probe end-to-end connectivity
+      // Step 4: VERIFYING — the tunnel is only real if the local inbound accepts
+      // connections. Probing the remote node proved nothing: it works even when
+      // the core never started.
       this.setState('VERIFYING');
-      this.emitLog('INFO', 'Verifying tunnel connectivity and cryptographic handshake...');
-      
-      const verified = await this.verifyConnection(server);
+      this.emitLog('INFO', `Verifying the local tunnel endpoint on 127.0.0.1:${localPort}...`);
+
+      const verified = await this.verifyLocalEndpoint(localPort, LOCAL_ENDPOINT_TIMEOUT_MS);
+      if (!this.isCurrent(myAttempt)) return false;
       if (!verified) {
-        this.emitLog('WARN', 'Initial verification warning; core is active, finalizing connection.');
+        this.emitLog('ERROR', `Nothing accepts connections on 127.0.0.1:${localPort} — the tunnel is not usable.`);
+        await this.teardown();
+        this.setState('ERROR');
+        return false;
       }
 
       // Step 5: Transition to CONNECTED
@@ -127,10 +169,10 @@ export class VpnConnectionManager extends EventEmitter {
 
       this.startTelemetryLoop();
       return true;
-
     } catch (err: any) {
+      if (!this.isCurrent(myAttempt)) return false;
       this.emitLog('ERROR', `Connection failed: ${err.message}`);
-      await this.disconnect();
+      await this.teardown();
       this.setState('ERROR');
       return false;
     }
@@ -139,6 +181,17 @@ export class VpnConnectionManager extends EventEmitter {
   public async disconnect(): Promise<void> {
     if (this.state === 'DISCONNECTED') return;
 
+    // Invalidate any in-flight connect before tearing anything down.
+    this.attempt += 1;
+    await this.teardown();
+  }
+
+  /**
+   * Restores the machine to a clean, unprotected networking state. Deliberately
+   * does not bump the attempt token, so it can also run from inside `connect()`
+   * on its own failure paths.
+   */
+  private async teardown(): Promise<void> {
     this.setState('DISCONNECTING');
     this.emitLog('INFO', 'Tearing down tunnel and restoring networking defaults...');
 
@@ -169,16 +222,69 @@ export class VpnConnectionManager extends EventEmitter {
   }
 
   /**
-   * Advisory end-to-end probe: a real TCP handshake to the selected node.
-   * A failure is reported as a warning but does not abort the connection,
-   * because some transports only accept traffic after the handshake settles.
+   * The core process died on its own (crash, or Task Manager). Before this the
+   * UI kept showing CONNECTED, the Windows proxy kept pointing at a dead port
+   * and the kill switch stayed armed.
    */
-  private async verifyConnection(server: VpnServerConfig): Promise<boolean> {
-    const latency = await DiagnosticsService.testTcpLatency(server.server, server.port, PING_TIMEOUT_MS);
-    if (latency < 0) return false;
+  private handleCoreExit(code: number | null, signal: NodeJS.Signals | null): void {
+    if (this.state !== 'CONNECTED' && this.state !== 'VERIFYING') return;
 
-    this.currentPing = latency;
-    return true;
+    this.emitLog('ERROR', `VPN core exited unexpectedly (code ${code}, signal ${signal}). The tunnel is down.`);
+    void this.handleUnexpectedLoss();
+  }
+
+  private async handleUnexpectedLoss(): Promise<void> {
+    this.attempt += 1;
+    this.stopTelemetryLoop();
+
+    await SystemProxyManager.disableProxy();
+    if (this.killSwitchArmed) {
+      await KillSwitch.disarm();
+      this.killSwitchArmed = false;
+    }
+
+    this.activeServer = undefined;
+    this.sessionStartTime = 0;
+    this.setState('ERROR');
+    this.emitLog('WARN', 'Networking defaults were restored. Reconnect when you are ready.');
+  }
+
+  /**
+   * Called when Windows resumes from sleep/hibernate: the tunnel may not
+   * survive it, and the UI used to keep reporting CONNECTED with ping 0.
+   */
+  public async handleResume(): Promise<void> {
+    if (this.state !== 'CONNECTED') return;
+
+    const port = this.settings.inboundSocksPort || 10808;
+    const stillUp = this.coreManager.isRunning() && (await this.verifyLocalEndpoint(port, 2000));
+
+    if (stillUp) {
+      this.emitLog('INFO', 'Resumed from sleep: the tunnel is still reachable.');
+      return;
+    }
+
+    this.emitLog('WARN', 'Resumed from sleep and the tunnel is no longer reachable; tearing it down.');
+    this.attempt += 1;
+    await this.coreManager.stopCore();
+    await this.handleUnexpectedLoss();
+  }
+
+  /**
+   * Waits until the local inbound actually accepts a TCP connection.
+   */
+  private async verifyLocalEndpoint(port: number, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+
+    for (;;) {
+      const latency = await DiagnosticsService.testTcpLatency('127.0.0.1', port, 1000);
+      if (latency >= 0) {
+        this.currentPing = latency;
+        return true;
+      }
+      if (Date.now() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
   }
 
   private startTelemetryLoop(): void {
@@ -187,7 +293,11 @@ export class VpnConnectionManager extends EventEmitter {
     this.lastMeterAt = 0;
     this.tickCount = 0;
 
-    // Throughput comes from the OS counters of the real core process.
+    // Throughput comes from the OS counters of the real core process. The old
+    // meter must be stopped first: overwriting the field left the previous
+    // interval running forever, spawning a PowerShell every 2 seconds and
+    // double-counting the traffic.
+    this.meter?.stop();
     this.meter = new TrafficMeter(
       () => this.coreManager.getActivePid(),
       (sample) => this.handleTrafficSample(sample)
@@ -226,13 +336,16 @@ export class VpnConnectionManager extends EventEmitter {
   private async refreshPing(): Promise<void> {
     if (this.pingInFlight || !this.activeServer || this.state !== 'CONNECTED') return;
 
+    const myAttempt = this.attempt;
+    const server = this.activeServer;
+
     this.pingInFlight = true;
     try {
-      const latency = await DiagnosticsService.testTcpLatency(
-        this.activeServer.server,
-        this.activeServer.port,
-        PING_TIMEOUT_MS
-      );
+      const latency = await DiagnosticsService.testTcpLatency(server.server, server.port, PING_TIMEOUT_MS);
+      // A stale probe must not repopulate the ping of a session that ended
+      // while the probe was in flight.
+      if (myAttempt !== this.attempt || this.state !== 'CONNECTED') return;
+
       // -1 means the probe timed out or was rejected: report it as unknown (0).
       this.currentPing = latency >= 0 ? latency : 0;
     } finally {

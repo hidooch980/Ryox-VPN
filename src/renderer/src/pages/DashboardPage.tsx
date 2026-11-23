@@ -127,7 +127,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               </div>
               <div className="text-[11px] font-mono text-slate-400 flex items-center justify-between">
                 <span>{selectedServer.server}:{selectedServer.port}</span>
-                {selectedServer.latency && (
+                {(selectedServer.latency ?? 0) > 0 && (
                   <span className="text-emerald-400">{selectedServer.latency} ms</span>
                 )}
               </div>

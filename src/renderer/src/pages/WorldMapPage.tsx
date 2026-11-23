@@ -187,7 +187,7 @@ export const WorldMapPage: React.FC<WorldMapPageProps> = ({
                     setTooltipPos(null);
                   }}
                 >
-                  <title>{`${server.name}${server.latency ? ` — ${server.latency}ms` : ''}`}</title>
+                  <title>{`${server.name}${(server.latency ?? 0) > 0 ? ` — ${server.latency}ms` : ''}`}</title>
                 </circle>
 
                 {/* Country code label */}
@@ -223,7 +223,7 @@ export const WorldMapPage: React.FC<WorldMapPageProps> = ({
               }}
             >
               <div className="font-bold text-cyan-300">{srv.name}</div>
-              {srv.latency !== undefined && (
+              {srv.latency != null && srv.latency > 0 && (
                 <div className="text-slate-400 mt-0.5">
                   تأخیر: <span className={`font-mono ${srv.latency < 100 ? 'text-emerald-400' : srv.latency < 200 ? 'text-amber-400' : 'text-red-400'}`}>{srv.latency} ms</span>
                 </div>
@@ -256,7 +256,7 @@ export const WorldMapPage: React.FC<WorldMapPageProps> = ({
               >
                 <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isSelected ? 'bg-amber-400' : 'bg-cyan-400'}`} />
                 <span className="truncate">{server.name}</span>
-                {server.latency !== undefined && (
+                {server.latency != null && server.latency > 0 && (
                   <span className={`ml-auto font-mono flex-shrink-0 ${
                     server.latency < 100 ? 'text-emerald-400' : server.latency < 200 ? 'text-amber-400' : 'text-red-400'
                   }`}>{server.latency}ms</span>

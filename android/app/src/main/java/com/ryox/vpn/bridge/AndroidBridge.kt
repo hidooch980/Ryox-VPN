@@ -2,9 +2,13 @@ package com.ryox.vpn.bridge
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import android.webkit.JavascriptInterface
 import android.widget.Toast
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
+import com.google.gson.JsonNull
+import com.google.gson.JsonObject
 import com.google.gson.reflect.TypeToken
 import com.ryox.vpn.MainActivity
 import com.ryox.vpn.service.RyoxVpnService
@@ -17,12 +21,24 @@ import java.util.concurrent.TimeUnit
 
 class AndroidBridge(private val activity: MainActivity) {
 
+    companion object {
+        private const val TAG = "AndroidBridge"
+    }
+
     private val gson = Gson()
+    // Same serializer but with nulls preserved: runDiagnostics must be able to
+    // emit an explicit `"dnsLeakDetected": null` (= not verified), which the
+    // default Gson silently drops.
+    private val gsonWithNulls = GsonBuilder().serializeNulls().create()
     private val prefs: SharedPreferences = activity.getSharedPreferences("ryox_vpn_prefs", Context.MODE_PRIVATE)
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
         .build()
+
+    private val ipv4Regex = Regex("""^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$""")
+    private val hostnameRegex =
+        Regex("""^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$""")
 
     private val candidateIps = listOf(
         "162.159.192.1",
@@ -58,15 +74,21 @@ class AndroidBridge(private val activity: MainActivity) {
 
     @JavascriptInterface
     fun getStats(): String {
+        val running = RyoxVpnService.isRunning
+        // Real per-session byte counters sampled from TrafficStats for this app's
+        // UID (the sing-box core runs as the same UID, so its proxied bytes are
+        // counted here). All zeros when no tunnel is up - never fabricated growth.
+        val traffic = RyoxVpnService.snapshotTraffic(activity.applicationInfo.uid)
         val stats = mapOf(
-            "connectionState" to if (RyoxVpnService.isRunning) "CONNECTED" else "DISCONNECTED",
+            "connectionState" to if (running) "CONNECTED" else "DISCONNECTED",
             "activeCore" to "sing-box",
-            "uploadSpeed" to (if (RyoxVpnService.isRunning) 256000 else 0),
-            "downloadSpeed" to (if (RyoxVpnService.isRunning) 1420000 else 0),
-            "totalUpload" to 12500000,
-            "totalDownload" to 84500000,
-            "sessionDuration" to 340,
-            "pingMs" to 42
+            "uploadSpeed" to traffic.uploadSpeed,
+            "downloadSpeed" to traffic.downloadSpeed,
+            "totalUpload" to traffic.totalUpload,
+            "totalDownload" to traffic.totalDownload,
+            "sessionDuration" to traffic.sessionDuration,
+            // No ping prober runs on this path: 0 means "not measured".
+            "pingMs" to 0L
         )
         return gson.toJson(stats)
     }
@@ -246,6 +268,10 @@ class AndroidBridge(private val activity: MainActivity) {
 
     @JavascriptInterface
     fun pingServer(host: String, port: Int): Int {
+        // Reachable from any script in the WebView: accept only a plain public
+        // hostname or IP literal - never a URL, path, port-embedded string or
+        // a non-routable target such as 0.0.0.0 / loopback / LAN ranges.
+        if (!isPublicTarget(host) || port !in 1..65535) return -1
         var socket: Socket? = null
         return try {
             val start = System.currentTimeMillis()
@@ -257,6 +283,28 @@ class AndroidBridge(private val activity: MainActivity) {
         } finally {
             try { socket?.close() } catch (_: Exception) {}
         }
+    }
+
+    /** True only for a bare DNS hostname or a public IPv4 literal. */
+    private fun isPublicTarget(rawHost: String): Boolean {
+        val host = rawHost.trim()
+        if (host.isEmpty() || host.length > 253) return false
+
+        val ipv4 = ipv4Regex.matchEntire(host)
+        if (ipv4 != null) {
+            val octets = ipv4.groupValues.drop(1).map { it.toIntOrNull() ?: return false }
+            if (octets.any { it > 255 }) return false
+            val a = octets[0]
+            val b = octets[1]
+            if (a == 0 || a == 10 || a == 127 || a >= 224) return false   // this-net, private, loopback, multicast/reserved
+            if (a == 169 && b == 254) return false                        // link-local
+            if (a == 172 && b in 16..31) return false                     // private
+            if (a == 192 && b == 168) return false                        // private
+            return true
+        }
+
+        if (!hostnameRegex.matches(host)) return false
+        return !host.equals("localhost", ignoreCase = true)
     }
 
     @JavascriptInterface
@@ -413,17 +461,47 @@ class AndroidBridge(private val activity: MainActivity) {
 
     @JavascriptInterface
     fun getSources(): String {
+        // Shapes must match FreeConfigSource in src/shared/types.ts: the renderer
+        // reads maintainer / protocols / description / trustLevel directly.
         val sources = listOf(
-            mapOf("id" to "src-gh-1", "name" to "Yebekhe Free Proxy Pool", "url" to "https://github.com/yebekhe/TelegramFreeProxy", "enabled" to true),
-            mapOf("id" to "src-gh-2", "name" to "Barry-Far V2Ray Aggregator", "url" to "https://github.com/barry-far/V2RayAggregator", "enabled" to true),
-            mapOf("id" to "src-gh-3", "name" to "MahdiBland Free Protocols", "url" to "https://github.com/mahdibland/V2RayAggregator", "enabled" to true)
+            mapOf(
+                "id" to "src-gh-1",
+                "name" to "Yebekhe Free Proxy Pool",
+                "url" to "https://github.com/yebekhe/TelegramFreeProxy",
+                "maintainer" to "Yebekhe (Open-Source Community)",
+                "protocols" to listOf("vless", "vmess", "trojan", "shadowsocks"),
+                "enabled" to true,
+                "description" to "Auto-updated aggregation of public anti-censorship proxy endpoints",
+                "trustLevel" to "Community"
+            ),
+            mapOf(
+                "id" to "src-gh-2",
+                "name" to "Barry-Far V2Ray Aggregator",
+                "url" to "https://github.com/barry-far/V2RayAggregator",
+                "maintainer" to "Barry-Far (Open-Source Community)",
+                "protocols" to listOf("vless", "vmess", "trojan"),
+                "enabled" to true,
+                "description" to "Continuously refreshed public V2Ray and Reality configurations",
+                "trustLevel" to "Community"
+            ),
+            mapOf(
+                "id" to "src-gh-3",
+                "name" to "MahdiBland Free Protocols",
+                "url" to "https://github.com/mahdibland/V2RayAggregator",
+                "maintainer" to "MahdiBland (Open-Source Community)",
+                "protocols" to listOf("vless", "vmess", "shadowsocks"),
+                "enabled" to true,
+                "description" to "Large public feed of community verified free nodes",
+                "trustLevel" to "Community"
+            )
         )
         return gson.toJson(sources)
     }
 
     @JavascriptInterface
     fun fetchAllSources(): String {
-        val result = mapOf("successCount" to 3, "servers" to emptyList<Any>())
+        // Nothing is actually fetched on this path, so do not claim a success count.
+        val result = mapOf("successCount" to 0, "servers" to emptyList<Any>())
         return gson.toJson(result)
     }
 
@@ -434,26 +512,49 @@ class AndroidBridge(private val activity: MainActivity) {
 
     @JavascriptInterface
     fun getCoresMetadata(): String {
+        // Full CoreMetadata shape: the renderer prints description/license/upstream.
         val cores = listOf(
-            mapOf("id" to "sing-box", "name" to "sing-box", "version" to "v1.14.4", "installed" to true, "status" to "Ready", "category" to "Universal Core"),
-            mapOf("id" to "xray", "name" to "Xray-core", "version" to "v26.11.9", "installed" to true, "status" to "Ready", "category" to "Proxy Core")
+            mapOf(
+                "id" to "sing-box",
+                "name" to "sing-box Core",
+                "version" to "v1.10.7",
+                "installed" to true,
+                "status" to "Ready",
+                "category" to "Proxy Core",
+                "license" to "GPL-3.0",
+                "licenseUrl" to "https://github.com/SagerNet/sing-box/blob/dev/LICENSE",
+                "upstreamUrl" to "https://github.com/SagerNet/sing-box/releases",
+                "description" to "Universal proxy platform driving the Android TUN tunnel and protocol outbounds"
+            ),
+            mapOf(
+                "id" to "xray",
+                "name" to "Xray-core",
+                "version" to "v26.11.9",
+                "installed" to false,
+                "status" to "Not installed",
+                "category" to "Proxy Core",
+                "license" to "MPL-2.0",
+                "licenseUrl" to "https://github.com/XTLS/Xray-core/blob/main/LICENSE",
+                "upstreamUrl" to "https://github.com/XTLS/Xray-core/releases",
+                "description" to "Proxy engine for VLESS Reality, XTLS Vision and VMess transports"
+            )
         )
         return gson.toJson(cores)
     }
 
     @JavascriptInterface
     fun runDiagnostics(host: String): String {
-        val diag = mapOf(
-            "dnsLeakDetected" to false,
-            "currentPublicIp" to "188.114.96.1",
-            "country" to "Netherlands",
-            "isp" to "Cloudflare Anycast",
-            "pingLatency" to 38,
-            "tcpHandshakeMs" to 42,
-            "tunAdapterStatus" to "Active",
-            "timestamp" to System.currentTimeMillis()
-        )
-        return gson.toJson(diag)
+        // No DNS-leak probe and no latency prober exist on this build, so report
+        // "not verified" (-1 / null) instead of invented numbers, and read the
+        // adapter state from the real VpnService instead of hardcoding "Active".
+        val tunnelUp = RyoxVpnService.isRunning
+        val diag = JsonObject()
+        diag.add("dnsLeakDetected", JsonNull.INSTANCE)
+        diag.addProperty("pingLatency", -1)
+        diag.addProperty("tcpHandshakeMs", -1)
+        diag.addProperty("tunAdapterStatus", if (tunnelUp) "Active" else "Inactive")
+        diag.addProperty("timestamp", System.currentTimeMillis())
+        return gsonWithNulls.toJson(diag)
     }
 
     @JavascriptInterface
@@ -526,10 +627,19 @@ class AndroidBridge(private val activity: MainActivity) {
     }
 
     @JavascriptInterface
-    fun enableKillSwitch() {}
+    fun enableKillSwitch(): Boolean {
+        // Android gives a non-rooted app no OS-level firewall, so a real kill
+        // switch cannot be armed from here. Report that explicitly (false) and
+        // log it, instead of silently pretending the shield is active.
+        Log.w(TAG, "enableKillSwitch(): not supported on Android")
+        return false
+    }
 
     @JavascriptInterface
-    fun disableKillSwitch() {}
+    fun disableKillSwitch(): Boolean {
+        // Nothing is ever armed, so this is honestly a no-op that succeeds.
+        return true
+    }
 
     @JavascriptInterface
     fun showToast(msg: String) {

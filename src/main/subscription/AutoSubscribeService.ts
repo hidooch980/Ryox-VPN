@@ -1,7 +1,7 @@
 import * as https from 'https';
 import * as http from 'http';
 import { VpnServerConfig } from '../../shared/types';
-import { ProtocolParser } from '../protocol/parser';
+import { ProtocolParser, dedupeServers } from '../protocol/parser';
 
 const KNOWN_FREE_SOURCES: readonly string[] = [
   'https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/Eternity.txt',
@@ -33,26 +33,8 @@ function fetchUrl(url: string): Promise<string> {
 }
 
 function tryBase64Decode(raw: string): string {
-  const stripped = raw.replace(/\s+/g, '');
-  // A rudimentary base64 check: no protocol-like strings, length is multiple of 4
-  if (!stripped.includes('://') && stripped.length > 0 && stripped.length % 4 === 0) {
-    try {
-      const decoded = Buffer.from(stripped, 'base64').toString('utf-8');
-      // If the decoded text contains known protocol prefixes, it was base64
-      if (
-        decoded.includes('://') ||
-        decoded.includes('proxies:') ||
-        decoded.includes('vless') ||
-        decoded.includes('vmess') ||
-        decoded.includes('trojan')
-      ) {
-        return decoded;
-      }
-    } catch {
-      // fall through — not valid base64
-    }
-  }
-  return raw;
+  // Delegate to the shared lenient helper so unpadded / URL-safe payloads decode too.
+  return ProtocolParser.decodeBase64Payload(raw);
 }
 
 export class AutoSubscribeService {
@@ -64,7 +46,6 @@ export class AutoSubscribeService {
    */
   public async fetchAndParse(): Promise<VpnServerConfig[]> {
     const allServers: VpnServerConfig[] = [];
-    const seenIds = new Set<string>();
 
     await Promise.allSettled(
       KNOWN_FREE_SOURCES.map(async (url) => {
@@ -72,19 +53,15 @@ export class AutoSubscribeService {
           const raw = await fetchUrl(url);
           const content = tryBase64Decode(raw);
           const parsed = ProtocolParser.parseSubscription(content);
-          for (const srv of parsed) {
-            if (!seenIds.has(srv.id)) {
-              seenIds.add(srv.id);
-              allServers.push(srv);
-            }
-          }
+          allServers.push(...parsed);
         } catch (err) {
           console.warn(`[AutoSubscribeService] Failed to fetch/parse ${url}:`, err);
         }
       }),
     );
 
-    return allServers;
+    // Deduplicate by the stable node id (secret-aware) with a host:port:protocol fallback.
+    return dedupeServers(allServers);
   }
 
   /**
