@@ -33,6 +33,7 @@ import { api } from './api/client';
 
 export const App: React.FC = () => {
   const [activePage, setActivePage] = useState<PageId>('dashboard');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [servers, setServers] = useState<VpnServerConfig[]>([]);
   const [selectedServer, setSelectedServer] = useState<VpnServerConfig | undefined>(undefined);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
@@ -144,15 +145,35 @@ export const App: React.FC = () => {
         state={stats.connectionState}
         activeServerName={selectedServer?.name}
         pingMs={stats.pingMs}
+        onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
       />
 
       {/* Main Body with Sidebar + Content */}
-      <div className="flex-1 flex overflow-hidden">
-        <Sidebar
-          activePage={activePage}
-          onSelectPage={setActivePage}
-          serverCount={servers.length}
-        />
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Mobile backdrop */}
+        {isSidebarOpen && (
+          <div
+            className="md:hidden fixed inset-0 z-40 bg-black/70 backdrop-blur-sm transition-opacity"
+            onClick={() => setIsSidebarOpen(false)}
+          />
+        )}
+
+        {/* Sidebar: static on md+, sliding drawer on mobile */}
+        <div className={`
+          fixed md:relative inset-y-0 ${settings.language === 'fa' ? 'right-0' : 'left-0'} z-50
+          transform transition-transform duration-300 ease-in-out
+          ${isSidebarOpen ? 'translate-x-0' : (settings.language === 'fa' ? 'translate-x-full md:translate-x-0' : '-translate-x-full md:translate-x-0')}
+          flex h-full shadow-2xl md:shadow-none
+        `}>
+          <Sidebar
+            activePage={activePage}
+            onSelectPage={(page) => {
+              setActivePage(page);
+              setIsSidebarOpen(false);
+            }}
+            serverCount={servers.length}
+          />
+        </div>
 
         {/* Content Viewport */}
         <main className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900/30 via-slate-950/80 to-[#05070d]">

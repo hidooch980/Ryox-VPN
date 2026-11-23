@@ -1,47 +1,55 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:gravity="center"
-    android:background="@color/ryox_darkest"
-    android:padding="24dp">
+    android:background="#05070D">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="RYOX VPN"
-        android:textColor="@color/ryox_primary"
-        android:textSize="28sp"
-        android:textStyle="bold"
-        android:letterSpacing="0.1" />
+    <!-- Full-screen Web Dashboard Viewport -->
+    <WebView
+        android:id="@+id/webView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#05070D" />
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="100% Free Forever • Multi-Core Engine"
-        android:textColor="#94A3B8"
-        android:textSize="12sp"
-        android:layout_marginTop="4dp"
-        android:layout_marginBottom="48dp" />
+    <!-- Elegant Loading Screen until Web Assets render -->
+    <LinearLayout
+        android:id="@+id/loading_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="#05070D">
 
-    <TextView
-        android:id="@+id/tv_status"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="STATUS: DISCONNECTED"
-        android:textColor="@color/text_white"
-        android:textSize="14sp"
-        android:fontFamily="monospace"
-        android:layout_marginBottom="32dp" />
+        <ImageView
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:src="@mipmap/ic_launcher"
+            android:contentDescription="RYOX VPN Logo" />
 
-    <Button
-        android:id="@+id/btn_connect"
-        android:layout_width="220dp"
-        android:layout_height="64dp"
-        android:text="TAP TO CONNECT"
-        android:textColor="@color/ryox_darkest"
-        android:textStyle="bold"
-        android:backgroundTint="@color/ryox_primary" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="RYOX VPN"
+            android:textColor="#00E5FF"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.1"
+            android:layout_marginTop="16dp" />
 
-</LinearLayout>
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Loading Cyberpunk Interface..."
+            android:textColor="#64748B"
+            android:textSize="11sp"
+            android:layout_marginTop="6dp" />
+
+        <ProgressBar
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:indeterminateTint="#00E5FF"
+            android:layout_marginTop="24dp" />
+
+    </LinearLayout>
+
+</FrameLayout>

@@ -21,6 +21,18 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build Web Frontend Assets
+        run: |
+          npm ci || npm install
+          npm run build:renderer
+          mkdir -p android/app/src/main/assets/web
+          cp -r dist/* android/app/src/main/assets/web/
+
       - name: Accept Android SDK Licenses
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true

@@ -12,7 +12,120 @@ import {
 declare global {
   interface Window {
     ryoxApi?: any;
+    AndroidBridge?: any;
+    _onAndroidStateChanged?: (state: string) => void;
+    _onAndroidStatsUpdated?: (stats: any) => void;
+    _onAndroidLog?: (level: string, message: string) => void;
   }
+}
+
+// Android WebView Native Bridge Adapter
+if (typeof window !== 'undefined' && (window as any).AndroidBridge && !window.ryoxApi) {
+  const bridge = (window as any).AndroidBridge;
+  window.ryoxApi = {
+    connect: async (server: any) => {
+      return bridge.connect(JSON.stringify(server));
+    },
+    disconnect: async () => {
+      return bridge.disconnect();
+    },
+    getState: async () => {
+      return bridge.getState();
+    },
+    getStats: async () => {
+      try { return JSON.parse(bridge.getStats()); } catch { return null; }
+    },
+    getServers: async () => {
+      try { return JSON.parse(bridge.getServers()); } catch { return []; }
+    },
+    saveServer: async (server: any) => {
+      try { return JSON.parse(bridge.saveServer(JSON.stringify(server))); } catch { return []; }
+    },
+    removeServer: async (id: string) => {
+      try { return JSON.parse(bridge.removeServer(id)); } catch { return []; }
+    },
+    pingServer: async (server: any) => {
+      try { return bridge.pingServer(server.server, server.port); } catch { return -1; }
+    },
+    parseUri: async (_uri: string) => {
+      return null;
+    },
+    getSubscriptions: async () => {
+      try { return JSON.parse(bridge.getSubscriptions()); } catch { return []; }
+    },
+    addSubscription: async (name: string, url: string, interval: number) => {
+      try { return JSON.parse(bridge.addSubscription(name, url, interval)); } catch { return []; }
+    },
+    updateSubscription: async (id: string) => {
+      try { return JSON.parse(bridge.updateSubscription(id)); } catch { return []; }
+    },
+    removeSubscription: async (id: string) => {
+      try { return bridge.removeSubscription(id); } catch { return false; }
+    },
+    getSources: async () => {
+      try { return JSON.parse(bridge.getSources()); } catch { return []; }
+    },
+    fetchAllSources: async () => {
+      try { return JSON.parse(bridge.fetchAllSources()); } catch { return { successCount: 0, servers: [] }; }
+    },
+    toggleSource: async (id: string, enabled: boolean) => {
+      try { return bridge.toggleSource(id, enabled); } catch { return false; }
+    },
+    getCoresMetadata: async () => {
+      try { return JSON.parse(bridge.getCoresMetadata()); } catch { return []; }
+    },
+    getSettings: async () => {
+      try { return JSON.parse(bridge.getSettings()); } catch { return null; }
+    },
+    saveSettings: async (settings: any) => {
+      try { return bridge.saveSettings(JSON.stringify(settings)); } catch { return false; }
+    },
+    runDiagnostics: async (host?: string) => {
+      try { return JSON.parse(bridge.runDiagnostics(host || '')); } catch { return null; }
+    },
+    generateWarp: async (cleanIp?: string) => {
+      try { return JSON.parse(bridge.generateWarp(cleanIp || '')); } catch { return null; }
+    },
+    scanCleanIps: async () => {
+      try { return JSON.parse(bridge.scanCleanIps()); } catch { return []; }
+    },
+    testDownloadSpeed: async () => {
+      try { return JSON.parse(bridge.testDownloadSpeed()); } catch { return null; }
+    },
+    exportServers: async () => {
+      try { return bridge.exportServers(); } catch { return ''; }
+    },
+    smartConnect: async () => {
+      try {
+        const res = bridge.smartConnect();
+        return res ? JSON.parse(res) : null;
+      } catch { return null; }
+    },
+    fetchAutoSub: async () => {
+      try { return JSON.parse(bridge.fetchAutoSub()); } catch { return []; }
+    },
+    enableKillSwitch: async () => {
+      try { return bridge.enableKillSwitch(); } catch {}
+    },
+    disableKillSwitch: async () => {
+      try { return bridge.disableKillSwitch(); } catch {}
+    },
+    onStateChanged: (cb: any) => {
+      window._onAndroidStateChanged = cb;
+      return () => { window._onAndroidStateChanged = undefined; };
+    },
+    onStatsUpdated: (cb: any) => {
+      window._onAndroidStatsUpdated = cb;
+      return () => { window._onAndroidStatsUpdated = undefined; };
+    },
+    onLog: (cb: any) => {
+      window._onAndroidLog = cb;
+      return () => { window._onAndroidLog = undefined; };
+    },
+    minimizeWindow: () => {},
+    maximizeWindow: () => {},
+    closeWindow: () => {}
+  };
 }
 
 // In-memory fallback for web preview or mock testing
