@@ -10,9 +10,11 @@ This document maintains the official autonomous engineering status, test results
 - **Version**: `v1.0.0-stable`
 - **Business Model**: 100% Free Forever • Open Source (Apache 2.0) • Zero Ads • Zero Paywalls
 - **Platforms**: Windows (10, 11 / x64, ARM64) & Android (Android 10+ / ARM64, Universal)
-- **Active Core Architecture**: Modular Multi-Core Engine (sing-box, Xray-core, Mihomo, WireGuard, Hysteria 2)
+- **Active Core Architecture**: Modular Multi-Core Engine (`sing-box` v1.14.4, `Xray-core` v26.11.9, `Mihomo`, `WireGuard`, `Wintun` v0.14.1)
 - **Overall Build Status**: **STABLE & VERIFIED (GREEN)**
+- **Real Windows Package**: `dist-packaged/RYOX VPN Setup 1.0.0.exe` (119.4 MB)
 - **Test Suite Status**: **12 / 12 Tests Passing (100% Pass Rate)**
+- **Language Support**: فارسی (Persian with RTL) + English
 
 ---
 
