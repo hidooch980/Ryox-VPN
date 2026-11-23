@@ -144,7 +144,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activePage, onSelectPage, serv
           <span className="font-mono text-[10px]">100% Free Core</span>
         </div>
         <a 
-          href="https://github.com/ryox-vpn/Ryox-VPN" 
+          href="https://github.com/hidooch980/Ryox-VPN" 
           target="_blank" 
           rel="noreferrer"
           className="text-slate-500 hover:text-cyan-400 flex items-center gap-1 transition-colors"

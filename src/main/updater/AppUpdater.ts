@@ -18,7 +18,7 @@ export class AppUpdater {
 
   public static async checkForUpdates(): Promise<AppReleaseInfo> {
     try {
-      const res = await fetch('https://api.github.com/repos/ryox-vpn/Ryox-VPN/releases/latest', {
+      const res = await fetch('https://api.github.com/repos/hidooch980/Ryox-VPN/releases/latest', {
         headers: {
           'User-Agent': 'RYOX-VPN-Updater/1.0.0',
           'Accept': 'application/vnd.github.v3+json'

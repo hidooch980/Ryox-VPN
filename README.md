@@ -4,9 +4,9 @@
 ### The Ultimate Free & Open-Source Multi-Core Anti-Censorship VPN Client
 **Windows 10/11 • Android 10+ • 100% Free Forever • Open Source (Apache 2.0)**
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/ryox-vpn/Ryox-VPN/actions)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/hidooch980/Ryox-VPN/actions)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Release: v1.0.0](https://img.shields.io/badge/release-v1.0.0-cyan.svg)](https://github.com/ryox-vpn/Ryox-VPN/releases)
+[![Release: v1.0.0](https://img.shields.io/badge/release-v1.0.0-cyan.svg)](https://github.com/hidooch980/Ryox-VPN/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Android-informational.svg)]()
 [![Free Forever](https://img.shields.io/badge/cost-100%25%20Free%20Forever-success.svg)]()
 
@@ -99,7 +99,7 @@ flowchart TD
 
 ```bash
 # Clone the repository
-git clone https://github.com/ryox-vpn/Ryox-VPN.git
+git clone https://github.com/hidooch980/Ryox-VPN.git
 cd Ryox-VPN
 
 # Install dependencies

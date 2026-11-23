@@ -5,10 +5,10 @@
   "main": "dist-electron/main/index.js",
   "author": "RYOX Network Team <dev@ryoxvpn.org>",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/ryox-vpn/Ryox-VPN",
+  "homepage": "https://github.com/hidooch980/Ryox-VPN",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ryox-vpn/Ryox-VPN.git"
+    "url": "https://github.com/hidooch980/Ryox-VPN.git"
   },
   "scripts": {
     "dev": "vite",

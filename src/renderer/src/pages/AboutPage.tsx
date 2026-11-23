@@ -69,9 +69,9 @@ export const AboutPage: React.FC = () => {
             Full source code, GitHub Actions CI/CD pipelines, issue trackers, and release binaries are freely accessible to the public on GitHub.
           </p>
           <div className="pt-1 flex gap-3 text-cyan-400 font-mono text-[11px]">
-            <a href="https://github.com/ryox-vpn/Ryox-VPN" target="_blank" rel="noreferrer" className="hover:underline flex items-center gap-1">
+            <a href="https://github.com/hidooch980/Ryox-VPN" target="_blank" rel="noreferrer" className="hover:underline flex items-center gap-1">
               <GitBranch className="w-3.5 h-3.5" />
-              <span>github.com/ryox-vpn/Ryox-VPN</span>
+              <span>github.com/hidooch980/Ryox-VPN</span>
             </a>
           </div>
         </div>
