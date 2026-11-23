@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.ProxyInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -14,10 +15,9 @@ import androidx.core.app.NotificationCompat
 import com.ryox.vpn.MainActivity
 import com.ryox.vpn.R
 import kotlinx.coroutines.*
+import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.net.InetSocketAddress
-import java.nio.channels.DatagramChannel
 
 class RyoxVpnService : VpnService() {
 
@@ -33,6 +33,7 @@ class RyoxVpnService : VpnService() {
     }
 
     private var vpnInterface: ParcelFileDescriptor? = null
+    private var coreProcess: Process? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var activeJob: Job? = null
 
@@ -47,8 +48,8 @@ class RyoxVpnService : VpnService() {
         when (action) {
             ACTION_CONNECT -> {
                 val serverName = intent.getStringExtra("SERVER_NAME") ?: "RYOX Secure Node"
-                val serverHost = intent.getStringExtra("SERVER_HOST") ?: "127.0.0.1"
-                val serverPort = intent.getIntExtra("SERVER_PORT", 443)
+                val serverHost = intent.getStringExtra("SERVER_HOST") ?: "45.86.51.18"
+                val serverPort = intent.getIntExtra("SERVER_PORT", 19999)
                 startVpn(serverName, serverHost, serverPort)
             }
             ACTION_DISCONNECT -> {
@@ -66,18 +67,34 @@ class RyoxVpnService : VpnService() {
         startForeground(NOTIFICATION_ID, notification)
 
         try {
-            // Establish native TUN interface via Android VpnService.Builder
+            // Step 1: Start native sing-box core process on 127.0.0.1:10808
+            startSingBoxCore(host, port)
+
+            // Step 2: Establish native TUN interface with direct system proxy routing
             val builder = Builder()
                 .setSession("RYOX VPN")
                 .setMtu(1500)
                 .addAddress("172.19.0.1", 30)
-                .addRoute("0.0.0.0", 0)
                 .addDnsServer("1.1.1.1")
                 .addDnsServer("8.8.8.8")
-                .setBlocking(true)
+                .setBlocking(false)
 
+            // Bypass RYOX VPN app itself from tunnel to prevent routing loop
+            try {
+                builder.addDisallowedApplication(packageName)
+            } catch (e: Exception) {
+                Log.w(TAG, "addDisallowedApplication failed: ${e.message}")
+            }
+
+            // Direct system-wide traffic to local multi-core inbound proxy port (API 29+)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                builder.setMetered(false)
+                try {
+                    val proxy = ProxyInfo.buildDirectProxy("127.0.0.1", 10808)
+                    builder.setHttpProxy(proxy)
+                    builder.setMetered(false)
+                } catch (e: Exception) {
+                    Log.w(TAG, "setHttpProxy failed: ${e.message}")
+                }
             }
 
             vpnInterface = builder.establish()
@@ -86,7 +103,9 @@ class RyoxVpnService : VpnService() {
             Log.i(TAG, "RYOX VpnService established interface fd: ${vpnInterface?.fd}")
 
             activeJob = serviceScope.launch {
-                runTunnelLoop()
+                while (isActive && isRunning) {
+                    delay(1000)
+                }
             }
 
         } catch (e: Exception) {
@@ -95,25 +114,60 @@ class RyoxVpnService : VpnService() {
         }
     }
 
-    private suspend fun runTunnelLoop() = withContext(Dispatchers.IO) {
-        val pfd = vpnInterface ?: return@withContext
-        val inputStream = FileInputStream(pfd.fileDescriptor)
-        val outputStream = FileOutputStream(pfd.fileDescriptor)
-        val buffer = ByteArray(32768)
+    private fun startSingBoxCore(host: String, port: Int) {
+        try {
+            val libFile = File(applicationInfo.nativeLibraryDir, "libsingbox.so")
+            if (libFile.exists()) {
+                val configFile = File(filesDir, "singbox.json")
+                val configJson = """
+                {
+                  "log": { "level": "warn" },
+                  "dns": {
+                    "servers": [
+                      { "tag": "remote-dns", "type": "udp", "server": "1.1.1.1", "detour": "proxy" },
+                      { "tag": "direct-dns", "type": "local", "detour": "direct" }
+                    ],
+                    "final": "remote-dns"
+                  },
+                  "inbounds": [
+                    {
+                      "type": "mixed",
+                      "tag": "mixed-in",
+                      "listen": "127.0.0.1",
+                      "listen_port": 10808
+                    }
+                  ],
+                  "outbounds": [
+                    {
+                      "tag": "proxy",
+                      "type": "shadowsocks",
+                      "server": "$host",
+                      "server_port": $port,
+                      "method": "aes-256-gcm",
+                      "password": "ZRpgaBeGxtENIXgvhpkZBKz9GnWRS2dYcx9O+a2iwN4="
+                    },
+                    { "type": "direct", "tag": "direct" }
+                  ],
+                  "route": {
+                    "rules": [
+                      { "network": ["tcp", "udp"], "outbound": "proxy" }
+                    ],
+                    "auto_detect_interface": true
+                  }
+                }
+                """.trimIndent()
+                configFile.writeText(configJson)
 
-        Log.i(TAG, "RYOX Tunnel packet processing loop started.")
-        while (isActive && isRunning) {
-            try {
-                val length = inputStream.read(buffer)
-                if (length > 0) {
-                    // Forward packets through core tunnel adapter
-                }
-            } catch (e: Exception) {
-                if (isActive) {
-                    Log.w(TAG, "Tunnel read error: ${e.message}")
-                }
-                break
+                coreProcess = ProcessBuilder(libFile.absolutePath, "run", "-c", configFile.absolutePath)
+                    .redirectErrorStream(true)
+                    .start()
+
+                Log.i(TAG, "Native sing-box core started successfully.")
+            } else {
+                Log.w(TAG, "libsingbox.so not found at ${libFile.absolutePath}")
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error starting sing-box core: ${e.message}", e)
         }
     }
 
@@ -123,8 +177,13 @@ class RyoxVpnService : VpnService() {
         activeJob?.cancel()
 
         try {
+            coreProcess?.destroyForcibly()
+        } catch (_: Exception) {}
+        coreProcess = null
+
+        try {
             vpnInterface?.close()
-        } catch (ignored: Exception) {}
+        } catch (_: Exception) {}
         vpnInterface = null
 
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -162,24 +221,12 @@ class RyoxVpnService : VpnService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val disconnectIntent = Intent(this, RyoxVpnService::class.java).apply {
-            action = ACTION_DISCONNECT
-        }
-        val disconnectPending = PendingIntent.getService(
-            this,
-            1,
-            disconnectIntent,
-            PendingIntent.FLAG_IMMUTABLE
-        )
-
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_vpn_notification)
             .setContentIntent(pendingIntent)
-            .addAction(R.drawable.ic_vpn_notification, "Disconnect", disconnectPending)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
 }

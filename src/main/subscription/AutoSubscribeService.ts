@@ -4,11 +4,10 @@ import { VpnServerConfig } from '../../shared/types';
 import { ProtocolParser } from '../protocol/parser';
 
 const KNOWN_FREE_SOURCES: readonly string[] = [
-  'https://raw.githubusercontent.com/yebekhe/TelegramFreeProxy/main/sub/base64',
-  'https://raw.githubusercontent.com/barry-far/V2RayAggregator/master/Sub.txt',
   'https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/Eternity.txt',
-  'https://raw.githubusercontent.com/mfuu/v2ray/master/v2ray',
-  'https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2',
+  'https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/v2ray.txt',
+  'https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub',
+  'https://raw.githubusercontent.com/freefq/free/master/v2'
 ];
 
 function fetchUrl(url: string): Promise<string> {

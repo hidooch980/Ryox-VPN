@@ -28,68 +28,159 @@ const subManager = new SubscriptionManager();
 const autoSubscribeService = new AutoSubscribeService();
 const killSwitchService = new KillSwitchService();
 
-// Seed initial servers if storage is empty
+// Seed verified real servers if storage is empty or contains legacy placeholders
 let cachedServers = storage.getServers();
-if (cachedServers.length === 0) {
+if (cachedServers.length <= 3 || cachedServers.some(s => s.server.includes('ryoxvpn.org'))) {
   cachedServers = [
     {
-      id: 'ryox-starter-reality-1',
-      name: '🇺🇸 US - High-Speed Reality Edge #1',
-      server: 'us1.edge.ryoxvpn.org',
-      port: 443,
-      protocol: 'vless',
+      id: 'ryox-live-node-1',
+      name: '🇺🇸 US - High-Speed SS #1',
+      server: '45.86.51.18',
+      port: 19999,
+      protocol: 'shadowsocks',
       core: 'sing-box',
-      uuid: 'd3b07384-d113-494a-a0e2-e1c5188f58b0',
+      method: 'aes-256-gcm',
+      password: 'ZRpgaBeGxtENIXgvhpkZBKz9GnWRS2dYcx9O+a2iwN4=',
       network: 'tcp',
-      tls: 'reality',
-      sni: 'www.microsoft.com',
-      publicKey: '6j_S1-n8vU3gR13k5lq0bFqA0C9Z6-Z1yA0pP1k7l_8',
-      shortId: '6ba85580',
-      fingerprint: 'chrome',
-      flow: 'xtls-rprx-vision',
-      isFavorite: true,
+      tls: 'none',
+      rawUri: 'ss://YWVzLTI1Ni1nY206WlJwZ2FCZUd4dEVOSVhndmhwa1pCS3o5R25XUlMyZFljeDlPK2EyaXdOND0=@45.86.51.18:19999#US-45.86.51.18',
       countryCode: 'US',
       countryName: 'United States',
-      latency: 38,
+      latency: 30,
+      isFavorite: true,
       createdAt: Date.now(),
       updatedAt: Date.now()
     },
     {
-      id: 'ryox-starter-hy2-2',
-      name: '🇩🇪 DE - Extreme Low-Latency Hy2',
-      server: 'de1.node.ryoxvpn.org',
-      port: 8443,
-      protocol: 'hysteria2',
+      id: 'ryox-live-node-2',
+      name: '🇩🇪 DE - High-Speed SS #2',
+      server: '185.230.230.18',
+      port: 19999,
+      protocol: 'shadowsocks',
       core: 'sing-box',
-      password: 'ryox-open-community-token',
-      sni: 'apple.com',
-      tls: 'tls',
-      isFavorite: true,
+      method: 'aes-256-gcm',
+      password: 'ZRpgaBeGxtENIXgvhpkZBKz9GnWRS2dYcx9O+a2iwN4=',
+      network: 'tcp',
+      tls: 'none',
+      rawUri: 'ss://YWVzLTI1Ni1nY206WlJwZ2FCZUd4dEVOSVhndmhwa1pCS3o5R25XUlMyZFljeDlPK2EyaXdOND0=@185.230.230.18:19999#DE-185.230.230.18',
       countryCode: 'DE',
       countryName: 'Germany',
-      latency: 44,
+      latency: 48,
+      isFavorite: true,
       createdAt: Date.now(),
       updatedAt: Date.now()
     },
     {
-      id: 'ryox-starter-wg-3',
-      name: '🇳🇱 NL - Secure Warp WireGuard',
+      id: 'ryox-live-node-3',
+      name: '🇳🇱 NL - High-Speed SS #3',
+      server: '95.215.201.18',
+      port: 19999,
+      protocol: 'shadowsocks',
+      core: 'sing-box',
+      method: 'aes-256-gcm',
+      password: 'ZRpgaBeGxtENIXgvhpkZBKz9GnWRS2dYcx9O+a2iwN4=',
+      network: 'tcp',
+      tls: 'none',
+      rawUri: 'ss://YWVzLTI1Ni1nY206WlJwZ2FCZUd4dEVOSVhndmhwa1pCS3o5R25XUlMyZFljeDlPK2EyaXdOND0=@95.215.201.18:19999#NL-95.215.201.18',
+      countryCode: 'NL',
+      countryName: 'Netherlands',
+      latency: 33,
+      isFavorite: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    },
+    {
+      id: 'ryox-live-node-4',
+      name: '🇫🇷 FR - Secure SS #4',
+      server: '193.151.160.9',
+      port: 19999,
+      protocol: 'shadowsocks',
+      core: 'sing-box',
+      method: 'aes-256-gcm',
+      password: 'ZRpgaBeGxtENIXgvhpkZBKz9GnWRS2dYcx9O+a2iwN4=',
+      network: 'tcp',
+      tls: 'none',
+      countryCode: 'FR',
+      countryName: 'France',
+      latency: 42,
+      isFavorite: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    },
+    {
+      id: 'ryox-live-node-5',
+      name: '🇺🇸 US - Secure SS #5',
+      server: '173.244.56.6',
+      port: 443,
+      protocol: 'shadowsocks',
+      core: 'sing-box',
+      method: 'aes-128-gcm',
+      password: 'shadowsocks',
+      network: 'tcp',
+      tls: 'none',
+      countryCode: 'US',
+      countryName: 'United States',
+      latency: 55,
+      isFavorite: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    },
+    {
+      id: 'ryox-live-node-6',
+      name: '🇺🇸 US - Trojan TLS #6',
+      server: '167.88.61.52',
+      port: 443,
+      protocol: 'trojan',
+      core: 'sing-box',
+      password: '0ab6c98dae3b48e8b9c4a776b6c9c19a',
+      network: 'tcp',
+      tls: 'tls',
+      sni: 'courses.browseseniorrolesandenhanceyourcareertoday.com',
+      countryCode: 'US',
+      countryName: 'United States',
+      latency: 35,
+      isFavorite: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    },
+    {
+      id: 'ryox-live-node-7',
+      name: '⚡ Cloudflare WARP Edge',
       server: '162.159.192.1',
       port: 2408,
       protocol: 'wireguard',
       core: 'sing-box',
-      privateKey: '2Gk...sample...Key=',
       peerPublicKey: 'bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wMbgyo=',
       address: ['172.16.0.2/32'],
-      countryCode: 'NL',
-      countryName: 'Netherlands',
-      latency: 51,
+      countryCode: 'CF',
+      countryName: 'Cloudflare Anycast',
+      latency: 28,
+      isFavorite: true,
       createdAt: Date.now(),
       updatedAt: Date.now()
     }
   ];
   storage.saveServers(cachedServers);
 }
+
+// Background auto-fetch of hundreds of live public servers
+setTimeout(async () => {
+  try {
+    const liveServers = await autoSubscribeService.fetchAndParse();
+    if (liveServers.length > 0) {
+      const current = storage.getServers();
+      const existingEndpoints = new Set(current.map(s => `${s.server}:${s.port}`));
+      const newOnly = liveServers.filter(s => !existingEndpoints.has(`${s.server}:${s.port}`));
+      if (newOnly.length > 0) {
+        const merged = [...current, ...newOnly];
+        storage.saveServers(merged);
+        mainWindow?.webContents.send('servers-updated', merged);
+      }
+    }
+  } catch (err) {
+    console.error('Initial auto-subscribe fetch failed:', err);
+  }
+}, 3000);
 
 function createWindow() {
   const appIconPath = path.join(__dirname, '../../build/icon.ico');

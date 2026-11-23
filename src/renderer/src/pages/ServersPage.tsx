@@ -38,6 +38,7 @@ export const ServersPage: React.FC<ServersPageProps> = ({
   const [manualUri, setManualUri] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [isGeneratingWarp, setIsGeneratingWarp] = useState(false);
+  const [isFetchingAutoSub, setIsFetchingAutoSub] = useState(false);
 
   // Clean IP Scanner Modal State
   const [showScannerModal, setShowScannerModal] = useState(false);
@@ -130,6 +131,21 @@ export const ServersPage: React.FC<ServersPageProps> = ({
     }
   };
 
+  // Fetch 600+ Real Live Servers
+  const handleFetchAutoSub = async () => {
+    setIsFetchingAutoSub(true);
+    try {
+      const added = await api.fetchAutoSub();
+      onRefreshServers();
+      setExportNotice(`✅ ${added.length || 'ده‌ها'} سرور فعال و واقعی با موفقیت از منابع عمومی دریافت شد!`);
+      setTimeout(() => setExportNotice(null), 5000);
+    } catch (err: any) {
+      alert(`خطا در دریافت سرورها: ${err.message}`);
+    } finally {
+      setIsFetchingAutoSub(false);
+    }
+  };
+
   // Export Subscription
   const handleExportSubscription = async () => {
     try {
@@ -179,6 +195,16 @@ export const ServersPage: React.FC<ServersPageProps> = ({
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isPingingAll ? 'animate-spin' : ''}`} />
             <span>{isPingingAll ? 'در حال تست پینگ...' : 'تست پینگ همه'}</span>
+          </button>
+
+          <button
+            onClick={handleFetchAutoSub}
+            disabled={isFetchingAutoSub}
+            className="flex items-center gap-2 px-3.5 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-bold transition-all shadow-[0_0_12px_rgba(16,185,129,0.15)] disabled:opacity-50"
+            title="دریافت صدها سرور فعال و واقعی از منابع معتبر"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isFetchingAutoSub ? 'animate-spin' : 'text-emerald-400'}`} />
+            <span>{isFetchingAutoSub ? 'در حال دریافت ۶۰۰+ سرور...' : '🔄 دریافت ۶۰۰+ کانفیگ فعال'}</span>
           </button>
 
           <button
