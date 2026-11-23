@@ -37,8 +37,11 @@ export class XrayAdapter {
       {
         tag: 'direct',
         protocol: 'freedom',
-        settings: {
-          domainStrategy: 'UseIP'
+        settings: {},
+        streamSettings: {
+          sockopt: {
+            domainStrategy: 'UseIP'
+          }
         }
       },
       {

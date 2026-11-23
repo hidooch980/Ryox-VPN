@@ -37,7 +37,8 @@ export class StorageManager {
       bypassChinaAndIranLan: true,
       bypassPrivateIps: true,
       theme: 'cyberpunk',
-      accentColor: '#00e5ff'
+      accentColor: '#00e5ff',
+      language: 'fa'
     };
 
     try {

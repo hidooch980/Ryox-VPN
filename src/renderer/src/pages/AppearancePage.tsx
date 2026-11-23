@@ -35,6 +35,53 @@ export const AppearancePage: React.FC<AppearancePageProps> = ({ settings, onSett
         </p>
       </div>
 
+      {/* Language Selection */}
+      <div className="space-y-3">
+        <span className="text-xs font-mono font-bold tracking-wider text-slate-400 uppercase">
+          {settings.language === 'fa' ? 'انتخاب زبان / LANGUAGE' : 'LANGUAGE / انتخاب زبان'}
+        </span>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div
+            onClick={async () => {
+              const updated: AppSettings = { ...settings, language: 'fa' };
+              await api.saveSettings(updated);
+              onSettingsUpdated(updated);
+            }}
+            className={`p-4 rounded-xl border cursor-pointer transition-all space-y-1 ${
+              settings.language === 'fa'
+                ? 'bg-cyan-950/30 border-cyan-500/50 shadow-[0_0_15px_rgba(0,229,255,0.15)]'
+                : 'bg-slate-900/40 border-slate-800'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-xs text-slate-200">فارسی (Persian)</span>
+              {settings.language === 'fa' && <Check className="w-4 h-4 text-cyan-400" />}
+            </div>
+            <p className="text-[11px] text-slate-400">رابط کاربری تماماً فارسی با چینش راست به چپ (RTL)</p>
+          </div>
+
+          <div
+            onClick={async () => {
+              const updated: AppSettings = { ...settings, language: 'en' };
+              await api.saveSettings(updated);
+              onSettingsUpdated(updated);
+            }}
+            className={`p-4 rounded-xl border cursor-pointer transition-all space-y-1 ${
+              settings.language === 'en'
+                ? 'bg-cyan-950/30 border-cyan-500/50 shadow-[0_0_15px_rgba(0,229,255,0.15)]'
+                : 'bg-slate-900/40 border-slate-800'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-xs text-slate-200">English (انگلیسی)</span>
+              {settings.language === 'en' && <Check className="w-4 h-4 text-cyan-400" />}
+            </div>
+            <p className="text-[11px] text-slate-400">Standard English interface layout</p>
+          </div>
+        </div>
+      </div>
+
       {/* Theme Modes */}
       <div className="space-y-3">
         <span className="text-xs font-mono font-bold tracking-wider text-slate-400 uppercase">

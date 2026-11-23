@@ -56,7 +56,8 @@ export const App: React.FC = () => {
     bypassChinaAndIranLan: true,
     bypassPrivateIps: true,
     theme: 'cyberpunk',
-    accentColor: '#00e5ff'
+    accentColor: '#00e5ff',
+    language: 'fa'
   });
 
   const [stats, setStats] = useState<LiveStats>({
@@ -133,7 +134,10 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="h-screen w-screen bg-[#05070d] text-slate-100 flex flex-col overflow-hidden font-sans select-none">
+    <div 
+      className="h-screen w-screen bg-[#05070d] text-slate-100 flex flex-col overflow-hidden font-sans select-none"
+      dir={settings.language === 'fa' ? 'rtl' : 'ltr'}
+    >
       {/* Top TitleBar */}
       <TitleBar
         state={stats.connectionState}

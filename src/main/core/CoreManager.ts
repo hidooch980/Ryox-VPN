@@ -140,14 +140,19 @@ export class CoreManager {
   }
 
   public isBinaryPresent(coreName: string): boolean {
-    const ext = process.platform === 'win32' ? '.exe' : '';
-    const binPath = path.join(this.baseBinDir, `${coreName}${ext}`);
+    const binPath = this.getBinaryPath(coreName);
     return fs.existsSync(binPath);
   }
 
   public getBinaryPath(coreName: string): string {
     const ext = process.platform === 'win32' ? '.exe' : '';
-    return path.join(this.baseBinDir, `${coreName}${ext}`);
+    const userBin = path.join(this.baseBinDir, `${coreName}${ext}`);
+    if (fs.existsSync(userBin)) return userBin;
+
+    const localBin = path.join(process.cwd(), 'bin', `${coreName}${ext}`);
+    if (fs.existsSync(localBin)) return localBin;
+
+    return userBin;
   }
 
   /**

@@ -37,6 +37,16 @@ export class VpnConnectionManager extends EventEmitter {
     this.settings = settings;
   }
 
+  private sanitizeLog(msg: string): string {
+    return msg
+      .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '***-UUID-REDACTED-***')
+      .replace(/(password|secret|key|pbk|shortid)=[^&\s]+/gi, '$1=***REDACTED***');
+  }
+
+  public emitLog(level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG', msg: string): void {
+    this.emit('log', level, this.sanitizeLog(msg));
+  }
+
   public async connect(server: VpnServerConfig): Promise<boolean> {
     if (this.state === 'CONNECTING' || this.state === 'CONNECTED') {
       await this.disconnect();
@@ -44,48 +54,48 @@ export class VpnConnectionManager extends EventEmitter {
 
     this.setState('CONNECTING');
     this.activeServer = server;
-    this.emit('log', 'INFO', `Initiating connection to ${server.name} via ${server.protocol.toUpperCase()}...`);
+    this.emitLog('INFO', `Initiating connection to ${server.name} via ${server.protocol.toUpperCase()}...`);
 
     try {
       // Step 1: Start the Core process
       const started = await this.coreManager.startCore(server, this.settings);
       if (!started) {
-        this.emit('log', 'ERROR', `Failed to start VPN engine for ${server.protocol}`);
+        this.emitLog('ERROR', `Failed to start VPN engine for ${server.protocol}`);
         this.setState('ERROR');
         return false;
       }
 
       // Step 2: Configure System Proxy if in SystemProxy mode
       if (this.settings.tunnelMode === 'SystemProxy') {
-        this.emit('log', 'INFO', `Applying Windows system proxy on port ${this.settings.inboundSocksPort || 10808}...`);
+        this.emitLog('INFO', `Applying Windows system proxy on port ${this.settings.inboundSocksPort || 10808}...`);
         await SystemProxyManager.enableProxy(this.settings.inboundSocksPort || 10808);
       }
 
       // Step 3: Arm KillSwitch if enabled
       if (this.settings.killSwitch) {
-        this.emit('log', 'INFO', 'Arming traffic leak protection (Kill Switch)...');
+        this.emitLog('INFO', 'Arming traffic leak protection (Kill Switch)...');
         await KillSwitch.arm();
       }
 
       // Step 4: VERIFYING state — probe end-to-end connectivity
       this.setState('VERIFYING');
-      this.emit('log', 'INFO', 'Verifying tunnel connectivity and cryptographic handshake...');
+      this.emitLog('INFO', 'Verifying tunnel connectivity and cryptographic handshake...');
       
       const verified = await this.verifyConnection(server);
       if (!verified) {
-        this.emit('log', 'WARN', 'Initial verification warning; core is active, finalizing connection.');
+        this.emitLog('WARN', 'Initial verification warning; core is active, finalizing connection.');
       }
 
       // Step 5: Transition to CONNECTED
       this.sessionStartTime = Date.now();
       this.setState('CONNECTED');
-      this.emit('log', 'INFO', `Connected successfully to [${server.name}]. Tunnel established.`);
+      this.emitLog('INFO', `Connected successfully to [${server.name}]. Tunnel established.`);
 
       this.startTelemetryLoop();
       return true;
 
     } catch (err: any) {
-      this.emit('log', 'ERROR', `Connection failed: ${err.message}`);
+      this.emitLog('ERROR', `Connection failed: ${err.message}`);
       await this.disconnect();
       this.setState('ERROR');
       return false;
@@ -96,7 +106,7 @@ export class VpnConnectionManager extends EventEmitter {
     if (this.state === 'DISCONNECTED') return;
 
     this.setState('DISCONNECTING');
-    this.emit('log', 'INFO', 'Tearing down tunnel and restoring networking defaults...');
+    this.emitLog('INFO', 'Tearing down tunnel and restoring networking defaults...');
 
     this.stopTelemetryLoop();
 
@@ -112,7 +122,7 @@ export class VpnConnectionManager extends EventEmitter {
     this.activeServer = undefined;
     this.sessionStartTime = 0;
     this.setState('DISCONNECTED');
-    this.emit('log', 'INFO', 'VPN disconnected. Network returned to normal.');
+    this.emitLog('INFO', 'VPN disconnected. Network returned to normal.');
   }
 
   private setState(newState: ConnectionState): void {

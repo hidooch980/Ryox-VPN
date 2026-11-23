@@ -9,9 +9,7 @@ export class SingBoxAdapter {
         type: 'mixed',
         tag: 'mixed-in',
         listen: settings.allowLan ? '0.0.0.0' : '127.0.0.1',
-        listen_port: settings.inboundSocksPort || 10808,
-        sniff: true,
-        sniff_override_destination: false
+        listen_port: settings.inboundSocksPort || 10808
       }
     ];
 
@@ -23,8 +21,7 @@ export class SingBoxAdapter {
         inet4_address: '172.19.0.1/30',
         auto_route: true,
         strict_route: settings.killSwitch,
-        stack: 'system',
-        sniff: true
+        stack: 'system'
       });
     }
 
@@ -37,35 +34,30 @@ export class SingBoxAdapter {
       {
         type: 'block',
         tag: 'block'
-      },
-      {
-        type: 'dns',
-        tag: 'dns-out'
       }
     ];
 
     const rules: any[] = [
       {
         protocol: 'dns',
-        outbound: 'dns-out'
+        action: 'hijack-dns'
       },
       {
-        geosite: 'category-ads-all',
+        domain_suffix: ['doubleclick.net', 'googleadservices.com'],
         outbound: 'block'
       }
     ];
 
     if (settings.bypassChinaAndIranLan) {
       rules.push({
-        geoip: ['private', 'ir', 'cn'],
-        geosite: ['cn', 'category-ir'],
+        domain_suffix: ['.ir', '.cn'],
         outbound: 'direct'
       });
     }
 
     if (settings.bypassPrivateIps) {
       rules.push({
-        geoip: ['private'],
+        ip_is_private: true,
         outbound: 'direct'
       });
     }
@@ -97,30 +89,25 @@ export class SingBoxAdapter {
         servers: [
           {
             tag: 'remote-dns',
-            address: settings.dnsOverHttps && settings.dohUrl 
-              ? settings.dohUrl 
-              : (settings.customDnsEnabled && settings.dnsServers[0] ? settings.dnsServers[0] : '1.1.1.1'),
+            type: 'udp',
+            server: settings.customDnsEnabled && settings.dnsServers[0] ? settings.dnsServers[0] : '1.1.1.1',
             detour: 'proxy'
           },
           {
             tag: 'direct-dns',
-            address: 'local',
+            type: 'local',
             detour: 'direct'
           }
         ],
-        rules: [
-          {
-            outbound: 'any',
-            server: 'direct-dns'
-          }
-        ],
+        final: 'remote-dns',
         strategy: 'prefer_ipv4'
       },
       inbounds,
       outbounds,
       route: {
         rules,
-        auto_detect_interface: true
+        auto_detect_interface: true,
+        default_domain_resolver: 'direct-dns'
       }
     };
   }

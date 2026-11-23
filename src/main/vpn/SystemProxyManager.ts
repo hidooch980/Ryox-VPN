@@ -1,28 +1,35 @@
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export class SystemProxyManager {
   private static isWindows = process.platform === 'win32';
 
   public static async enableProxy(port: number, host: string = '127.0.0.1'): Promise<boolean> {
+    // Sanitize input to prevent injection
+    const cleanPort = Math.floor(Number(port));
+    if (isNaN(cleanPort) || cleanPort < 1 || cleanPort > 65535) {
+      console.error('[SystemProxyManager] Invalid port:', port);
+      return false;
+    }
+
+    const cleanHost = host.replace(/[^a-zA-Z0-9\.\-_]/g, '') || '127.0.0.1';
+
     if (!this.isWindows) {
-      process.env.HTTP_PROXY = `http://${host}:${port}`;
-      process.env.HTTPS_PROXY = `http://${host}:${port}`;
+      process.env.HTTP_PROXY = `http://${cleanHost}:${cleanPort}`;
+      process.env.HTTPS_PROXY = `http://${cleanHost}:${cleanPort}`;
       return true;
     }
 
     try {
-      const proxyServer = `${host}:${port}`;
-      // Windows registry command to enable Internet Options proxy
-      const cmdEnable = `reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable /t REG_DWORD /d 1 /f`;
-      const cmdServer = `reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyServer /t REG_SZ /d "${proxyServer}" /f`;
-      const cmdOverride = `reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyOverride /t REG_SZ /d "<local>;localhost;127.*;10.*;172.16.*;192.168.*" /f`;
+      const regKey = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
+      const proxyServer = `${cleanHost}:${cleanPort}`;
 
-      await execAsync(cmdEnable);
-      await execAsync(cmdServer);
-      await execAsync(cmdOverride);
+      // Execute directly via reg.exe with sanitized parameter array (Zero shell injection risk)
+      await execFileAsync('reg', ['add', regKey, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '1', '/f']);
+      await execFileAsync('reg', ['add', regKey, '/v', 'ProxyServer', '/t', 'REG_SZ', '/d', proxyServer, '/f']);
+      await execFileAsync('reg', ['add', regKey, '/v', 'ProxyOverride', '/t', 'REG_SZ', '/d', '<local>;localhost;127.*;10.*;172.16.*;192.168.*', '/f']);
       return true;
     } catch (err) {
       console.error('[SystemProxyManager] Failed to set Windows proxy:', err);
@@ -38,8 +45,8 @@ export class SystemProxyManager {
     }
 
     try {
-      const cmdDisable = `reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable /t REG_DWORD /d 0 /f`;
-      await execAsync(cmdDisable);
+      const regKey = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
+      await execFileAsync('reg', ['add', regKey, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '0', '/f']);
       return true;
     } catch (err) {
       console.error('[SystemProxyManager] Failed to disable Windows proxy:', err);

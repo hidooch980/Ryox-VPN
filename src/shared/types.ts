@@ -136,6 +136,7 @@ export interface AppSettings {
   selectedServerId?: string;
   theme: 'dark' | 'light' | 'cyberpunk';
   accentColor: string;
+  language: 'en' | 'fa';
 }
 
 export interface LiveStats {

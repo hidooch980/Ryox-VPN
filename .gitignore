@@ -2,6 +2,9 @@ node_modules/
 dist/
 dist-electron/
 dist-packaged/
+bin/*.exe
+bin/*.dll
+bin/*.dat
 .gradle/
 build/
 android/app/build/
