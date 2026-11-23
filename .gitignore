@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-electron/
+dist-packaged/
+.gradle/
+build/
+android/app/build/
+android/.gradle/
+*.log
+.env
+.DS_Store
+Thumbs.db

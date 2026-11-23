@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.RyoxVpn" parent="Theme.MaterialComponents.DayNight">
+        <item name="colorPrimary">@color/ryox_primary</item>
+        <item name="android:statusBarColor">@color/ryox_darkest</item>
+        <item name="android:navigationBarColor">@color/ryox_darkest</item>
+    </style>
+
+    <style name="Theme.RyoxVpn.NoActionBar" parent="Theme.RyoxVpn">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+    </style>
+</resources>

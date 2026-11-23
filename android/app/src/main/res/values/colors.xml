@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ryox_darkest">#05070D</color>
+    <color name="ryox_dark">#0A0F1D</color>
+    <color name="ryox_primary">#00E5FF</color>
+    <color name="ryox_emerald">#10B981</color>
+    <color name="ryox_purple">#8B5CF6</color>
+    <color name="text_white">#F8FAFC</color>
+</resources>

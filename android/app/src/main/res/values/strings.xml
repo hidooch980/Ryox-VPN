@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">RYOX VPN</string>
+    <string name="vpn_connected">Protected &amp; Encrypted</string>
+    <string name="vpn_disconnected">Direct Connection</string>
+</resources>

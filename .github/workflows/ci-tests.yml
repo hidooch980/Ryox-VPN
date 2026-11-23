@@ -1,0 +1,33 @@
+name: CI Tests & Quality Checks
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Project Dependencies
+        run: npm ci
+
+      - name: Execute Automated Vitest Suite
+        run: npm run test
+
+      - name: Verify Frontend Compilation
+        run: npm run build:renderer
+
+      - name: Verify Electron Main Compilation
+        run: npm run build:electron
