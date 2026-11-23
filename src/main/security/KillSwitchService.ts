@@ -1,86 +1,33 @@
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-
-const execFileAsync = promisify(execFile);
+import { KillSwitch } from '../vpn/KillSwitch';
 
 /**
- * Windows Firewall Kill Switch — blocks all outbound traffic except the
- * local proxy ports (10808, 10809) while enabled.
+ * Thin façade over {@link KillSwitch} kept for the `killswitch:enable` /
+ * `killswitch:disable` IPC surface.
  *
- * All arguments passed to execFile are hard-coded literals; no user input
- * is ever interpolated into the command line, preventing shell injection.
- * shell: true is intentionally NOT used.
+ * Historically this class installed its own firewall rules that blocked *all*
+ * outbound traffic while only allowing the local proxy ports. That also blocked
+ * the VPN core's own connection to the remote node, so enabling the kill switch
+ * tore the tunnel down. There is now a single implementation: the rules created
+ * by `KillSwitch`, which exempt the core process, the TUN adapter and loopback.
  */
 export class KillSwitchService {
-  private enabled = false;
+  /** Path of the VPN core executable to exempt from the block rule. */
+  private coreBinaryPath?: string;
 
-  /**
-   * Installs two Windows Firewall rules:
-   *  1. RYOX-KillSwitch      — block ALL outbound traffic
-   *  2. RYOX-KillSwitch-Allow — allow outbound on TCP 10808 and 10809 (proxy ports)
-   */
-  public async enable(): Promise<void> {
-    // Block all outbound traffic
-    await execFileAsync('netsh', [
-      'advfirewall',
-      'firewall',
-      'add',
-      'rule',
-      'name=RYOX-KillSwitch',
-      'dir=out',
-      'action=block',
-    ]);
-
-    // Allow outbound on local proxy ports so the proxy core can still reach its endpoints
-    await execFileAsync('netsh', [
-      'advfirewall',
-      'firewall',
-      'add',
-      'rule',
-      'name=RYOX-KillSwitch-Allow',
-      'dir=out',
-      'action=allow',
-      'localport=10808,10809',
-      'protocol=tcp',
-    ]);
-
-    this.enabled = true;
+  public setCoreBinaryPath(binaryPath?: string): void {
+    this.coreBinaryPath = binaryPath;
   }
 
-  /**
-   * Removes both RYOX kill-switch firewall rules, restoring normal connectivity.
-   */
+  public async enable(): Promise<boolean> {
+    return KillSwitch.arm(this.coreBinaryPath);
+  }
+
   public async disable(): Promise<void> {
-    // Remove the block rule (errors are caught individually so both always run)
-    try {
-      await execFileAsync('netsh', [
-        'advfirewall',
-        'firewall',
-        'delete',
-        'rule',
-        'name=RYOX-KillSwitch',
-      ]);
-    } catch (err) {
-      console.warn('[KillSwitchService] Failed to remove RYOX-KillSwitch rule:', err);
-    }
-
-    try {
-      await execFileAsync('netsh', [
-        'advfirewall',
-        'firewall',
-        'delete',
-        'rule',
-        'name=RYOX-KillSwitch-Allow',
-      ]);
-    } catch (err) {
-      console.warn('[KillSwitchService] Failed to remove RYOX-KillSwitch-Allow rule:', err);
-    }
-
-    this.enabled = false;
+    await KillSwitch.disarm();
   }
 
   /** Returns whether the kill switch firewall rules are currently active. */
   public isEnabled(): boolean {
-    return this.enabled;
+    return KillSwitch.isArmed();
   }
 }

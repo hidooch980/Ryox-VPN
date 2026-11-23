@@ -1,5 +1,13 @@
 import os
+import sys
+
 from PIL import Image, ImageDraw, ImageFilter
+
+# Windows consoles default to a legacy code page (cp1252) that cannot encode the
+# non-ASCII workspace path, which used to crash this script before the .ico was
+# written. Force UTF-8 output so the generator always completes.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 def create_ryox_icon(size=512):
     # Create base RGBA canvas

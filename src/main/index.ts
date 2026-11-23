@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
 import { StorageManager } from './storage/StorageManager';
 import { CoreManager } from './core/CoreManager';
 import { VpnConnectionManager } from './vpn/VpnConnectionManager';
@@ -15,9 +16,24 @@ import { VpnServerConfig, AppSettings } from '../shared/types';
 import { AutoSubscribeService } from './subscription/AutoSubscribeService';
 import { SmartConnectService } from './vpn/SmartConnectService';
 import { KillSwitchService } from './security/KillSwitchService';
+import { KillSwitch } from './vpn/KillSwitch';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+
+/**
+ * Resolve a build asset (app/tray icon) for both dev and packaged runs.
+ * - Dev:      <root>/dist-electron/main/index.js -> <root>/build/<file>
+ * - Packaged: electron-builder copies build/icon.ico to resources/icon.ico
+ *   (see "extraResources" in package.json), so an asar-safe path is used.
+ */
+function resolveBuildAsset(fileName: string): string {
+  const candidates = app.isPackaged
+    ? [path.join(process.resourcesPath, fileName)]
+    : [path.join(__dirname, '../../build', fileName), path.join(process.resourcesPath, fileName)];
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0];
+}
 
 const storage = new StorageManager();
 const settings = storage.getSettings();
@@ -182,8 +198,17 @@ setTimeout(async () => {
   }
 }, 3000);
 
-function createWindow() {
-  const appIconPath = path.join(__dirname, '../../build/icon.ico');
+/**
+ * True when the tray icon asset is present, i.e. the tray can actually be
+ * created. Used so "start minimized" never hides the only window when there is
+ * no tray to restore it from.
+ */
+function canCreateTray(): boolean {
+  return !nativeImage.createFromPath(resolveBuildAsset('icon.ico')).isEmpty();
+}
+
+function createWindow(options: { hidden?: boolean } = {}) {
+  const appIconPath = resolveBuildAsset('icon.ico');
   const appIcon = nativeImage.createFromPath(appIconPath);
 
   mainWindow = new BrowserWindow({
@@ -192,7 +217,8 @@ function createWindow() {
     minWidth: 960,
     minHeight: 650,
     frame: false,
-    icon: appIcon,
+    show: !options.hidden,
+    icon: appIcon.isEmpty() ? undefined : appIcon,
     backgroundColor: '#05070d',
     title: 'RYOX VPN',
     webPreferences: {
@@ -213,12 +239,30 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+
+  // Closing the window keeps RYOX alive in the tray (the VPN may still be
+  // connected). The app is quit explicitly from the tray menu, which sets
+  // `isQuitting` so this guard stops blocking the real shutdown.
+  mainWindow.on('close', (event) => {
+    if (!isQuitting && tray) {
+      event.preventDefault();
+      mainWindow?.hide();
+    }
+  });
 }
 
 // System Tray setup
 function createTray() {
-  const iconPath = path.join(__dirname, '../../build/icon.ico');
+  const iconPath = resolveBuildAsset('icon.ico');
   const icon = nativeImage.createFromPath(iconPath);
+
+  // A missing/empty icon makes the tray invisible on Windows and throws on some
+  // Linux desktops, so skip tray creation instead of shipping a dead icon.
+  if (icon.isEmpty()) {
+    console.warn(`Tray icon not found at "${iconPath}" — tray disabled.`);
+    return;
+  }
+
   tray = new Tray(icon);
   tray.setToolTip('RYOX VPN — 100% Free Forever');
 
@@ -275,22 +319,89 @@ vpnManager.on('log', (level, msg) => {
 
 // App lifecycle
 app.whenReady().then(() => {
-  createWindow();
+  // Clear kill-switch rules left behind by a previous crash, otherwise the
+  // machine could still be blocked from the network while RYOX is not running.
+  void KillSwitch.disarm();
+
+  // "Start minimized to system tray" only makes sense when a tray exists.
+  const startHidden = settings.startMinimized && canCreateTray();
+  createWindow({ hidden: startHidden });
   createTray();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    else mainWindow?.show();
   });
+
+  if (settings.autoConnectOnLaunch) {
+    // Let the renderer attach its IPC listeners before dialing out.
+    setTimeout(() => {
+      void autoConnectOnLaunch();
+    }, 2000);
+  }
 });
 
+/**
+ * Honour the "Auto-Connect on Launch" setting: pick a reachable node and dial
+ * it without any user interaction. Failures are logged and never block startup.
+ */
+async function autoConnectOnLaunch(): Promise<void> {
+  const servers = storage.getServers();
+  if (servers.length === 0) {
+    console.warn('[auto-connect] Enabled, but no servers are stored — skipping.');
+    return;
+  }
+
+  try {
+    const smartConnect = new SmartConnectService(servers, vpnManager);
+    const connected = await smartConnect.smartConnect(servers);
+    if (connected) {
+      console.log(`[auto-connect] Connected to "${connected.name}".`);
+    } else {
+      console.warn('[auto-connect] No reachable server found.');
+    }
+  } catch (err) {
+    console.error('[auto-connect] Failed:', err);
+  }
+}
+
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+  // With a tray present the app keeps running in the background so an active
+  // tunnel survives closing the dashboard window.
+  if (process.platform !== 'darwin' && !tray) {
     app.quit();
   }
 });
 
-app.on('before-quit', async () => {
-  await vpnManager.disconnect();
+// Quitting must finish VPN teardown, otherwise the OS-level kill-switch
+// firewall rules can survive the process and leave the machine offline.
+let isQuitting = false;
+let quitCleanupDone = false;
+app.on('before-quit', (event) => {
+  if (quitCleanupDone) {
+    isQuitting = true;
+    return;
+  }
+
+  event.preventDefault();
+  void (async () => {
+    try {
+      await vpnManager.disconnect();
+    } catch (err) {
+      console.error('[quit] Failed to disconnect VPN cleanly:', err);
+    }
+    try {
+      if (killSwitchService.isEnabled()) {
+        await killSwitchService.disable();
+      }
+    } catch (err) {
+      console.error('[quit] Failed to remove kill-switch rules:', err);
+    } finally {
+      quitCleanupDone = true;
+      isQuitting = true;
+      app.quit();
+    }
+  })();
 });
 
 // Window controls
@@ -379,9 +490,24 @@ ipcMain.handle('sources:toggle', (_e, id: string, enabled: boolean) => {
 ipcMain.handle('cores:get', () => coreManager.getCoresMetadata());
 ipcMain.handle('cores:update', async (_e, _coreId: string) => true);
 ipcMain.handle('settings:get', () => storage.getSettings());
-ipcMain.handle('settings:save', (_e, newSettings: AppSettings) => {
+ipcMain.handle('settings:save', async (_e, newSettings: AppSettings) => {
+  const previous = vpnManager.getSettings();
   storage.saveSettings(newSettings);
   vpnManager.updateSettings(newSettings);
+
+  // Apply the kill-switch toggle immediately instead of waiting for the next
+  // connection, so "ARMED" in the UI matches the firewall's actual state.
+  if (Boolean(newSettings.killSwitch) !== Boolean(previous.killSwitch)) {
+    killSwitchService.setCoreBinaryPath(coreManager.getBinaryPath(newSettings.activeCore));
+    if (newSettings.killSwitch) {
+      const armed = await killSwitchService.enable();
+      vpnManager.setKillSwitchArmed(armed);
+    } else {
+      await killSwitchService.disable();
+      vpnManager.setKillSwitchArmed(false);
+    }
+  }
+
   return true;
 });
 
@@ -478,8 +604,8 @@ ipcMain.handle('autosub:fetch', async () => {
 // ── Kill Switch ───────────────────────────────────────────────────────────────
 ipcMain.handle('killswitch:enable', async () => {
   try {
-    await killSwitchService.enable();
-    return true;
+    killSwitchService.setCoreBinaryPath(coreManager.getBinaryPath(settings.activeCore));
+    return await killSwitchService.enable();
   } catch (err) {
     console.error('[IPC killswitch:enable] Error:', err);
     return false;

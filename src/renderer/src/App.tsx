@@ -59,7 +59,10 @@ export const App: React.FC = () => {
     bypassPrivateIps: true,
     theme: 'cyberpunk',
     accentColor: '#00e5ff',
-    language: 'fa'
+    language: 'fa',
+    enableTlsFragment: false,
+    fragmentLength: '100-200',
+    fragmentInterval: '10-20'
   });
 
   const [stats, setStats] = useState<LiveStats>({

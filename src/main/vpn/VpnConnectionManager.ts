@@ -3,8 +3,11 @@ import { ConnectionState, VpnServerConfig, AppSettings, LiveStats } from '../../
 import { CoreManager } from '../core/CoreManager';
 import { SystemProxyManager } from './SystemProxyManager';
 import { KillSwitch } from './KillSwitch';
-import * as http from 'http';
-import * as https from 'https';
+import { TrafficMeter, TrafficSample } from './TrafficMeter';
+import { DiagnosticsService } from '../diagnostics/DiagnosticsService';
+
+const PING_INTERVAL_TICKS = 5;
+const PING_TIMEOUT_MS = 2000;
 
 export class VpnConnectionManager extends EventEmitter {
   private state: ConnectionState = 'DISCONNECTED';
@@ -23,6 +26,13 @@ export class VpnConnectionManager extends EventEmitter {
   private publicIp?: string;
   private country?: string;
 
+  // Real traffic metering (Windows perf counters of the core process)
+  private meter?: TrafficMeter;
+  private lastMeterAt = 0;
+  private tickCount = 0;
+  private pingInFlight = false;
+  private killSwitchArmed = false;
+
   constructor(coreManager: CoreManager, settings: AppSettings) {
     super();
     this.coreManager = coreManager;
@@ -35,6 +45,17 @@ export class VpnConnectionManager extends EventEmitter {
 
   public updateSettings(settings: AppSettings): void {
     this.settings = settings;
+  }
+
+  /** Current settings snapshot (updated by `settings:save`). */
+  public getSettings(): AppSettings {
+    return this.settings;
+  }
+
+  /** Reflect an externally applied kill-switch state in the reported stats. */
+  public setKillSwitchArmed(armed: boolean): void {
+    this.killSwitchArmed = armed;
+    this.emitStats();
   }
 
   private sanitizeLog(msg: string): string {
@@ -54,6 +75,9 @@ export class VpnConnectionManager extends EventEmitter {
 
     this.setState('CONNECTING');
     this.activeServer = server;
+    this.totalUploadBytes = 0;
+    this.totalDownloadBytes = 0;
+    this.currentPing = 0;
     this.emitLog('INFO', `Initiating connection to ${server.name} via ${server.protocol.toUpperCase()}...`);
 
     try {
@@ -74,7 +98,17 @@ export class VpnConnectionManager extends EventEmitter {
       // Step 3: Arm KillSwitch if enabled
       if (this.settings.killSwitch) {
         this.emitLog('INFO', 'Arming traffic leak protection (Kill Switch)...');
-        await KillSwitch.arm();
+        const armed = await KillSwitch.arm(this.coreManager.getBinaryPath(server.core || this.settings.activeCore));
+        this.killSwitchArmed = armed;
+        if (armed) {
+          this.emitLog('INFO', 'Kill Switch armed: outbound traffic is restricted to the VPN core.');
+        } else {
+          this.emitLog(
+            'WARN',
+            'Kill Switch could not be armed (administrator rights are required to modify Windows Firewall). ' +
+              'Traffic may leak outside the tunnel.'
+          );
+        }
       }
 
       // Step 4: VERIFYING state — probe end-to-end connectivity
@@ -114,7 +148,10 @@ export class VpnConnectionManager extends EventEmitter {
     await SystemProxyManager.disableProxy();
 
     // Disarm Kill Switch
-    await KillSwitch.disarm();
+    if (this.killSwitchArmed) {
+      await KillSwitch.disarm();
+      this.killSwitchArmed = false;
+    }
 
     // Stop Core Engine
     await this.coreManager.stopCore();
@@ -131,37 +168,76 @@ export class VpnConnectionManager extends EventEmitter {
     this.emitStats();
   }
 
+  /**
+   * Advisory end-to-end probe: a real TCP handshake to the selected node.
+   * A failure is reported as a warning but does not abort the connection,
+   * because some transports only accept traffic after the handshake settles.
+   */
   private async verifyConnection(server: VpnServerConfig): Promise<boolean> {
-    // Quick latency check
-    const start = Date.now();
-    try {
-      this.currentPing = Math.floor(Math.random() * 40) + 35; // baseline ping ms
-      return true;
-    } catch {
-      return false;
-    }
+    const latency = await DiagnosticsService.testTcpLatency(server.server, server.port, PING_TIMEOUT_MS);
+    if (latency < 0) return false;
+
+    this.currentPing = latency;
+    return true;
   }
 
   private startTelemetryLoop(): void {
     if (this.statsTimer) clearInterval(this.statsTimer);
 
+    this.lastMeterAt = 0;
+    this.tickCount = 0;
+
+    // Throughput comes from the OS counters of the real core process.
+    this.meter = new TrafficMeter(
+      () => this.coreManager.getActivePid(),
+      (sample) => this.handleTrafficSample(sample)
+    );
+    this.meter.start();
+
     this.statsTimer = setInterval(() => {
       if (this.state !== 'CONNECTED') return;
 
-      // Realistic speed fluctuation simulation when connected
-      const downloadDelta = Math.floor(Math.random() * 850000) + 120000; // ~120KB - 970KB/s
-      const uploadDelta = Math.floor(Math.random() * 180000) + 25000;   // ~25KB - 200KB/s
-
-      this.currentDownloadSpeed = downloadDelta;
-      this.currentUploadSpeed = uploadDelta;
-      this.totalDownloadBytes += downloadDelta;
-      this.totalUploadBytes += uploadDelta;
-
-      // Jitter ping slightly
-      this.currentPing = Math.max(20, this.currentPing + Math.floor(Math.random() * 7) - 3);
+      this.tickCount += 1;
+      if (this.tickCount % PING_INTERVAL_TICKS === 0) {
+        void this.refreshPing();
+      }
 
       this.emitStats();
     }, 1000);
+  }
+
+  /** Integrates measured throughput into the session totals. */
+  private handleTrafficSample(sample: TrafficSample): void {
+    const now = Date.now();
+    const elapsedSeconds = this.lastMeterAt > 0 ? Math.min((now - this.lastMeterAt) / 1000, 10) : 0;
+    this.lastMeterAt = now;
+
+    this.currentDownloadSpeed = Math.round(sample.downloadBps);
+    this.currentUploadSpeed = Math.round(sample.uploadBps);
+
+    if (elapsedSeconds > 0) {
+      this.totalDownloadBytes += Math.round(sample.downloadBps * elapsedSeconds);
+      this.totalUploadBytes += Math.round(sample.uploadBps * elapsedSeconds);
+    }
+
+    if (this.state === 'CONNECTED') this.emitStats();
+  }
+
+  private async refreshPing(): Promise<void> {
+    if (this.pingInFlight || !this.activeServer || this.state !== 'CONNECTED') return;
+
+    this.pingInFlight = true;
+    try {
+      const latency = await DiagnosticsService.testTcpLatency(
+        this.activeServer.server,
+        this.activeServer.port,
+        PING_TIMEOUT_MS
+      );
+      // -1 means the probe timed out or was rejected: report it as unknown (0).
+      this.currentPing = latency >= 0 ? latency : 0;
+    } finally {
+      this.pingInFlight = false;
+    }
   }
 
   private stopTelemetryLoop(): void {
@@ -169,8 +245,13 @@ export class VpnConnectionManager extends EventEmitter {
       clearInterval(this.statsTimer);
       this.statsTimer = undefined;
     }
+    this.meter?.stop();
+    this.meter = undefined;
+    this.lastMeterAt = 0;
+    this.tickCount = 0;
     this.currentDownloadSpeed = 0;
     this.currentUploadSpeed = 0;
+    this.currentPing = 0;
     this.emitStats();
   }
 
@@ -187,7 +268,8 @@ export class VpnConnectionManager extends EventEmitter {
       sessionDuration: elapsedSeconds,
       pingMs: this.currentPing,
       clientIp: this.publicIp,
-      clientCountry: this.country
+      clientCountry: this.country,
+      killSwitchArmed: this.killSwitchArmed
     };
   }
 

@@ -625,10 +625,12 @@ export const api = {
     if (window.ryoxApi) return window.ryoxApi.fetchAutoSub();
     return [];
   },
-  async enableKillSwitch(): Promise<void> {
-    if (window.ryoxApi) return window.ryoxApi.enableKillSwitch();
+  async enableKillSwitch(): Promise<boolean> {
+    if (window.ryoxApi) return Boolean(await window.ryoxApi.enableKillSwitch());
+    return false;
   },
-  async disableKillSwitch(): Promise<void> {
-    if (window.ryoxApi) return window.ryoxApi.disableKillSwitch();
+  async disableKillSwitch(): Promise<boolean> {
+    if (window.ryoxApi) return Boolean(await window.ryoxApi.disableKillSwitch());
+    return false;
   },
 };

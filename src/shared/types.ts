@@ -166,6 +166,8 @@ export interface LiveStats {
   clientIp?: string;
   clientCountry?: string;
   clientCity?: string;
+  /** True only when OS-level firewall protection is actually installed. */
+  killSwitchArmed?: boolean;
 }
 
 export interface LogEntry {

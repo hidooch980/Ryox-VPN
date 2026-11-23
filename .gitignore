@@ -6,7 +6,10 @@ bin/*.exe
 bin/*.dll
 bin/*.dat
 .gradle/
-build/
+# Build outputs only — NOTE: build/ at the repo root holds the committed app
+# icon (build/icon.ico), which electron-builder and the tray icon depend on.
+android/build/
+build/outputs/
 android/app/build/
 android/.gradle/
 *.log

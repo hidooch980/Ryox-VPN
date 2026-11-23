@@ -26,6 +26,9 @@ jobs:
       - name: Execute Automated Vitest Suite
         run: npm run test
 
+      - name: Typecheck Renderer & Electron Sources
+        run: npm run typecheck
+
       - name: Verify Frontend Compilation
         run: npm run build:renderer
 

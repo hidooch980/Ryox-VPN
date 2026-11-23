@@ -30,8 +30,11 @@ jobs:
         run: |
           npm ci || npm install
           npm run build:renderer
+          # Rebuild the bundled web assets from scratch, otherwise stale hashed
+          # bundles from previous builds stay in the APK forever.
+          rm -rf android/app/src/main/assets/web
           mkdir -p android/app/src/main/assets/web
-          cp -r dist/* android/app/src/main/assets/web/
+          cp -r dist/. android/app/src/main/assets/web/
 
       - name: Accept Android SDK Licenses
         run: |

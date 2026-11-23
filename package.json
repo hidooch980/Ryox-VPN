@@ -15,6 +15,7 @@
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "build": "npm run build:renderer && npm run build:electron",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "test": "vitest run",
@@ -59,6 +60,10 @@
       {
         "from": "bin",
         "to": "bin"
+      },
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
       }
     ],
     "win": {

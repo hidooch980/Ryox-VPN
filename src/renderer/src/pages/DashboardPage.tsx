@@ -79,10 +79,23 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
         <div className="flex items-center gap-2">
           <span className="text-xs font-mono text-slate-400">Kill Switch:</span>
-          <span className={`text-xs font-mono px-2 py-0.5 rounded font-bold ${
-            settings.killSwitch ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'
-          }`}>
-            {settings.killSwitch ? 'ARMED' : 'OFF'}
+          <span
+            title={
+              stats.killSwitchArmed
+                ? 'Windows Firewall rules are installed: traffic is restricted to the VPN core.'
+                : settings.killSwitch
+                  ? 'Requested in settings, but firewall rules could not be installed. Run RYOX VPN as administrator to enforce it.'
+                  : 'Kill switch is disabled in settings.'
+            }
+            className={`text-xs font-mono px-2 py-0.5 rounded font-bold ${
+              stats.killSwitchArmed
+                ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-500/30'
+                : settings.killSwitch
+                  ? 'bg-amber-950/80 text-amber-400 border border-amber-500/30'
+                  : 'bg-slate-800 text-slate-400'
+            }`}
+          >
+            {stats.killSwitchArmed ? 'ARMED' : settings.killSwitch ? 'UNAVAILABLE' : 'OFF'}
           </span>
         </div>
       </div>

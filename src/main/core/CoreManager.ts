@@ -279,4 +279,12 @@ export class CoreManager {
   public getRunningCore(): SupportedCore | null {
     return this.currentCore;
   }
+
+  /**
+   * PID of the spawned core process, used for real traffic metering.
+   * Undefined in "virtual bridge mode" (no binary installed).
+   */
+  public getActivePid(): number | undefined {
+    return this.activeProcess?.pid;
+  }
 }
