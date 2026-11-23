@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 import { 
   VpnServerConfig, 
   AppSettings, 
@@ -74,7 +74,24 @@ export const electronApi = {
   // Window Controls
   minimizeWindow: () => ipcRenderer.send('window:minimize'),
   maximizeWindow: () => ipcRenderer.send('window:maximize'),
-  closeWindow: () => ipcRenderer.send('window:close')
+  closeWindow: () => ipcRenderer.send('window:close'),
+
+  // Smart Connect
+  smartConnect: (): Promise<VpnServerConfig | null> => ipcRenderer.invoke('smart-connect'),
+
+  // Auto Subscribe
+  startAutoSubscribe: (intervalHours: number): Promise<boolean> =>
+    ipcRenderer.invoke('autosub:start', intervalHours),
+  fetchAutoSubscribe: (): Promise<VpnServerConfig[]> => ipcRenderer.invoke('autosub:fetch'),
+  onAutoSubNewServers: (callback: (count: number) => void) => {
+    const handler = (_event: IpcRendererEvent, count: number) => callback(count);
+    ipcRenderer.on('autosub:new-servers', handler);
+    return () => ipcRenderer.removeListener('autosub:new-servers', handler);
+  },
+
+  // Kill Switch
+  enableKillSwitch: (): Promise<boolean> => ipcRenderer.invoke('killswitch:enable'),
+  disableKillSwitch: (): Promise<boolean> => ipcRenderer.invoke('killswitch:disable'),
 };
 
 contextBridge.exposeInMainWorld('ryoxApi', electronApi);

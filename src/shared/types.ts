@@ -140,6 +140,17 @@ export interface AppSettings {
   enableTlsFragment: boolean;
   fragmentLength: string;
   fragmentInterval: string;
+
+  // GeoIP bypass settings
+  bypassIran?: boolean;
+  bypassChina?: boolean;
+  customDirectDomains?: string[];
+
+  // Smart connect & auto-subscribe
+  smartConnectEnabled?: boolean;
+  autoSubscribeEnabled?: boolean;
+  autoSubscribeIntervalHours?: number;
+  killSwitchEnabled?: boolean;
 }
 
 export interface LiveStats {

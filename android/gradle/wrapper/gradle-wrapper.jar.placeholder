@@ -1,0 +1,2 @@
+This placeholder reminds that gradle-wrapper.jar must be downloaded via ./gradlew or gradle wrapper task.
+In CI, the gradlew script downloads the jar automatically.

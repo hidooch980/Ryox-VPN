@@ -26,6 +26,7 @@ export type PageId =
   | 'servers'
   | 'subscriptions'
   | 'free-sources'
+  | 'world-map'
   | 'core-manager'
   | 'protocol-manager'
   | 'config-editor'
@@ -54,7 +55,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ activePage, onSelectPage, serv
         { id: 'dashboard' as PageId, label: 'Dashboard', icon: LayoutDashboard },
         { id: 'servers' as PageId, label: 'Servers', icon: Server, badge: serverCount },
         { id: 'subscriptions' as PageId, label: 'Subscriptions', icon: Rss },
-        { id: 'free-sources' as PageId, label: 'Free Sources', icon: Globe2 }
+        { id: 'free-sources' as PageId, label: 'Free Sources', icon: Globe2 },
+        { id: 'world-map' as PageId, label: 'نقشه سرورها', icon: Globe2 }
       ]
     },
     {

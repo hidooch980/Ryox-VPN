@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification } from 'electron';
 import * as path from 'path';
 import { StorageManager } from './storage/StorageManager';
 import { CoreManager } from './core/CoreManager';
@@ -12,6 +12,9 @@ import { WarpService } from './warp/WarpService';
 import { CleanIpScanner } from './scanner/CleanIpScanner';
 import { ProtocolParser } from './protocol/parser';
 import { VpnServerConfig, AppSettings } from '../shared/types';
+import { AutoSubscribeService } from './subscription/AutoSubscribeService';
+import { SmartConnectService } from './vpn/SmartConnectService';
+import { KillSwitchService } from './security/KillSwitchService';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -22,6 +25,8 @@ const coreManager = new CoreManager();
 const vpnManager = new VpnConnectionManager(coreManager, settings);
 const freeSources = new FreeSourceDiscovery();
 const subManager = new SubscriptionManager();
+const autoSubscribeService = new AutoSubscribeService();
+const killSwitchService = new KillSwitchService();
 
 // Seed initial servers if storage is empty
 let cachedServers = storage.getServers();
@@ -158,6 +163,15 @@ coreManager.setLogCallback((level, msg) => {
 
 vpnManager.on('state-changed', (state) => {
   mainWindow?.webContents.send('vpn:state-changed', state);
+
+  // Native tray notifications
+  if (Notification.isSupported()) {
+    if (state === 'CONNECTED') {
+      new Notification({ title: 'RYOX VPN', body: 'اتصال برقرار شد ✅' }).show();
+    } else if (state === 'DISCONNECTED') {
+      new Notification({ title: 'RYOX VPN', body: 'اتصال قطع شد 🔴' }).show();
+    }
+  }
 });
 
 vpnManager.on('stats-updated', (stats) => {
@@ -303,4 +317,90 @@ ipcMain.handle('servers:export', async () => {
 });
 ipcMain.handle('updates:check-app', async () => {
   return await AppUpdater.checkForUpdates();
+});
+
+// ── Smart Connect ─────────────────────────────────────────────────────────────
+ipcMain.handle('smart-connect', async () => {
+  try {
+    const servers = storage.getServers();
+    const smartConnect = new SmartConnectService(servers, vpnManager);
+    return await smartConnect.smartConnect(servers);
+  } catch (err) {
+    console.error('[IPC smart-connect] Error:', err);
+    return null;
+  }
+});
+
+// ── AutoSubscribe ─────────────────────────────────────────────────────────────
+ipcMain.handle('autosub:start', async (_e, intervalHours: unknown) => {
+  try {
+    const hours = typeof intervalHours === 'number' && intervalHours > 0 ? intervalHours : 6;
+    autoSubscribeService.startAutoRefresh(hours, (newServers) => {
+      // Merge without duplicates
+      const existing = storage.getServers();
+      const existingIds = new Set(existing.map((s) => s.id));
+      const unique = newServers.filter((s) => !existingIds.has(s.id));
+      if (unique.length > 0) {
+        storage.saveServers([...existing, ...unique]);
+        mainWindow?.webContents.send('autosub:new-servers', unique.length);
+
+        if (Notification.isSupported()) {
+          new Notification({
+            title: 'RYOX VPN',
+            body: `${unique.length} سرور جدید اضافه شد 🌐`,
+          }).show();
+        }
+      }
+    });
+    return true;
+  } catch (err) {
+    console.error('[IPC autosub:start] Error:', err);
+    return false;
+  }
+});
+
+ipcMain.handle('autosub:fetch', async () => {
+  try {
+    const fetched = await autoSubscribeService.fetchAndParse();
+    if (fetched.length > 0) {
+      const existing = storage.getServers();
+      const existingIds = new Set(existing.map((s) => s.id));
+      const unique = fetched.filter((s) => !existingIds.has(s.id));
+      if (unique.length > 0) {
+        storage.saveServers([...existing, ...unique]);
+        if (Notification.isSupported()) {
+          new Notification({
+            title: 'RYOX VPN',
+            body: `${unique.length} سرور جدید اضافه شد 🌐`,
+          }).show();
+        }
+      }
+      return unique;
+    }
+    return [];
+  } catch (err) {
+    console.error('[IPC autosub:fetch] Error:', err);
+    return [];
+  }
+});
+
+// ── Kill Switch ───────────────────────────────────────────────────────────────
+ipcMain.handle('killswitch:enable', async () => {
+  try {
+    await killSwitchService.enable();
+    return true;
+  } catch (err) {
+    console.error('[IPC killswitch:enable] Error:', err);
+    return false;
+  }
+});
+
+ipcMain.handle('killswitch:disable', async () => {
+  try {
+    await killSwitchService.disable();
+    return true;
+  } catch (err) {
+    console.error('[IPC killswitch:disable] Error:', err);
+    return false;
+  }
 });

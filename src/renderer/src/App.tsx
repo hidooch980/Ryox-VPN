@@ -5,6 +5,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { ServersPage } from './pages/ServersPage';
 import { SubscriptionsPage } from './pages/SubscriptionsPage';
 import { FreeSourcesPage } from './pages/FreeSourcesPage';
+import { WorldMapPage } from './pages/WorldMapPage';
 import { CoreManagerPage } from './pages/CoreManagerPage';
 import { ProtocolManagerPage } from './pages/ProtocolManagerPage';
 import { ConfigEditorPage } from './pages/ConfigEditorPage';
@@ -188,6 +189,14 @@ export const App: React.FC = () => {
               sources={freeSources}
               onRefreshSources={loadAllData}
               onServersUpdated={loadAllData}
+            />
+          )}
+
+          {activePage === 'world-map' && (
+            <WorldMapPage
+              servers={servers}
+              selectedServer={selectedServer}
+              onSelectServer={setSelectedServer}
             />
           )}
 

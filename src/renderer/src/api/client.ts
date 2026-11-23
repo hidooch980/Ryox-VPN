@@ -502,5 +502,20 @@ export const api = {
 
   minimize: () => window.ryoxApi?.minimizeWindow(),
   maximize: () => window.ryoxApi?.maximizeWindow(),
-  close: () => window.ryoxApi?.closeWindow()
+  close: () => window.ryoxApi?.closeWindow(),
+
+  async smartConnect(): Promise<VpnServerConfig | null> {
+    if (window.ryoxApi) return window.ryoxApi.smartConnect();
+    return null;
+  },
+  async fetchAutoSub(): Promise<VpnServerConfig[]> {
+    if (window.ryoxApi) return window.ryoxApi.fetchAutoSub();
+    return [];
+  },
+  async enableKillSwitch(): Promise<void> {
+    if (window.ryoxApi) return window.ryoxApi.enableKillSwitch();
+  },
+  async disableKillSwitch(): Promise<void> {
+    if (window.ryoxApi) return window.ryoxApi.disableKillSwitch();
+  },
 };
