@@ -49,7 +49,9 @@ jobs:
         with:
           name: android-local-signing
           path: distribution/
-  install:
+  candidate:
+    permissions:
+      contents: write # GitHub restricts draft release assets to collaborators with push access.
     if: inputs.mode == 'install-test'
     runs-on: ubuntu-latest
     steps:
@@ -58,6 +60,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.release_tag }}
         run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p 'RYOX-VPN-1.1.1.apk'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-install-candidate
+          path: RYOX-VPN-1.1.1.apk
+  install:
+    needs: candidate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: signed-install-candidate
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
