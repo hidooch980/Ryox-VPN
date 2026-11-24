@@ -36,7 +36,7 @@ jobs:
           set -euo pipefail
           apk=android/app/build/outputs/apk/release/app-release-unsigned.apk
           tools="$ANDROID_HOME/build-tools/35.0.0"
-          sdkmanager 'build-tools;35.0.0' >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'build-tools;35.0.0' >/dev/null
           "$tools/aapt" dump badging "$apk" > "$RUNNER_TEMP/badging"
           grep -F "package: name='com.ryox.vpn' versionCode='3' versionName='1.1.1'" "$RUNNER_TEMP/badging"
           grep -F "application-label:'RYOX VPN'" "$RUNNER_TEMP/badging"
