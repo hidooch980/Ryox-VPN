@@ -1,6 +1,6 @@
 {
   "name": "ryox-vpn",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "RYOX VPN — Ultimate Free, Open Source Multi-Core VPN Client for Windows and Android",
   "main": "dist-electron/main/index.js",
   "author": "RYOX Network Team <dev@ryoxvpn.org>",
@@ -18,8 +18,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "vitest run --dir tests",
+    "test:watch": "vitest --dir tests",
     "validate:cores": "node scripts/validate-core-configs.js",
     "android:assets": "node scripts/sync-android-assets.js",
     "setup:cores": "powershell -ExecutionPolicy Bypass -File scripts/setup-cores.ps1",

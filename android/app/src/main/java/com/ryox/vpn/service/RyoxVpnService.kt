@@ -68,6 +68,10 @@ class RyoxVpnService : VpnService() {
         var isRunning: Boolean = false
             private set
 
+        @Volatile
+        var connectionState = "DISCONNECTED"
+            private set
+
         private var baselineUid: Int = -1
         private var baselineTx: Long = 0L
         private var baselineRx: Long = 0L
@@ -543,7 +547,7 @@ class RyoxVpnService : VpnService() {
     }
 
     private fun startVpn(serverJson: String) {
-        if (isRunning) return
+        if (isRunning || activeJob?.isActive == true) return
 
         val configJson = buildSingBoxConfig(serverJson)
         if (configJson == null) {
@@ -554,9 +558,10 @@ class RyoxVpnService : VpnService() {
         }
 
         val serverName = readServerName(serverJson)
+        connectionState = "CONNECTING"
         val notification = buildForegroundNotification(
-            "Connected to $serverName",
-            "Tunnel negotiated by sing-box"
+            "Connecting to $serverName",
+            "Checking proxy connection"
         )
         try {
             startForeground(NOTIFICATION_ID, notification)
@@ -569,7 +574,7 @@ class RyoxVpnService : VpnService() {
         }
 
         try {
-            val coreStarted = startSingBoxCore(configJson)
+            check(startSingBoxCore(configJson)) { "Unable to launch sing-box" }
 
             val builder = Builder()
                 .setSession("RYOX VPN")
@@ -595,7 +600,7 @@ class RyoxVpnService : VpnService() {
                     builder.setHttpProxy(proxy)
                     builder.setMetered(false)
                 } catch (e: Exception) {
-                    Log.w(TAG, "setHttpProxy failed: ${e.message}")
+                    throw IllegalStateException("System proxy setup failed", e)
                 }
             }
 
@@ -616,11 +621,36 @@ class RyoxVpnService : VpnService() {
             }
 
             vpnInterface = fd
-            markSessionStarted(applicationInfo.uid)
-            isRunning = true
-            Log.i(TAG, "TUN established (fd=${fd.fd}), coreStarted=$coreStarted")
-
+            connectionState = "VERIFYING"
             activeJob = serviceScope.launch(Dispatchers.Main) {
+                val ready = withContext(Dispatchers.IO) {
+                    val proxy = java.net.Proxy(java.net.Proxy.Type.HTTP,
+                        java.net.InetSocketAddress("127.0.0.1", MIXED_INBOUND_PORT))
+                    val client = okhttp3.OkHttpClient.Builder().proxy(proxy)
+                        .followRedirects(false).callTimeout(5, java.util.concurrent.TimeUnit.SECONDS).build()
+                    val request = okhttp3.Request.Builder()
+                        .url("https://connectivitycheck.gstatic.com/generate_204").build()
+                    var verified = false
+                    for (attempt in 1..3) {
+                        if (coreProcess?.isAlive != true) break
+                        verified = try {
+                            client.newCall(request).execute().use { it.code == 204 }
+                        } catch (_: java.io.IOException) { false }
+                        if (verified) break
+                        delay(300)
+                    }
+                    verified
+                }
+                if (!ready || coreProcess?.isAlive != true) {
+                    stopVpn()
+                    connectionState = "ERROR"
+                    return@launch
+                }
+                markSessionStarted(applicationInfo.uid)
+                isRunning = true
+                connectionState = "CONNECTED"
+                getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID,
+                    buildForegroundNotification("Connected to $serverName", "System proxy active"))
                 while (isActive && isRunning) {
                     delay(1000)
                     val core = coreProcess
@@ -696,6 +726,7 @@ class RyoxVpnService : VpnService() {
 
     private fun stopVpn() {
         Log.i(TAG, "Stopping RYOX VpnService...")
+        connectionState = "DISCONNECTED"
         isRunning = false
         activeJob?.cancel()
         activeJob = null

@@ -5,7 +5,7 @@ export const translations = {
     // Brand & App
     appName: 'RYOX VPN',
     tagline: '100% Free & Open Source',
-    version: 'v1.0.0',
+    version: 'v1.1.0',
     freeForeverPledge: 'Our Perpetual Manifesto: 100% Free Forever',
 
     // Connection States

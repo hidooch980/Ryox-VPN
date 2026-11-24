@@ -31,12 +31,14 @@ android {
     namespace = "com.ryox.vpn"
     compileSdk = 35
 
+    packaging { jniLibs.useLegacyPackaging = true }
+
     defaultConfig {
         applicationId = "com.ryox.vpn"
         minSdk = 29 // Android 10+
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {

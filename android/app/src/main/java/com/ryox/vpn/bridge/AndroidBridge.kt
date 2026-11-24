@@ -69,7 +69,7 @@ class AndroidBridge(private val activity: MainActivity) {
 
     @JavascriptInterface
     fun getState(): String {
-        return if (RyoxVpnService.isRunning) "CONNECTED" else "DISCONNECTED"
+        return RyoxVpnService.connectionState
     }
 
     @JavascriptInterface
@@ -80,7 +80,7 @@ class AndroidBridge(private val activity: MainActivity) {
         // counted here). All zeros when no tunnel is up - never fabricated growth.
         val traffic = RyoxVpnService.snapshotTraffic(activity.applicationInfo.uid)
         val stats = mapOf(
-            "connectionState" to if (running) "CONNECTED" else "DISCONNECTED",
+            "connectionState" to RyoxVpnService.connectionState,
             "activeCore" to "sing-box",
             "uploadSpeed" to traffic.uploadSpeed,
             "downloadSpeed" to traffic.downloadSpeed,

@@ -10,7 +10,7 @@ export interface AppReleaseInfo {
 }
 
 export class AppUpdater {
-  private static currentVersion = '1.0.0';
+  private static currentVersion = '1.1.0';
 
   public static getCurrentVersion(): string {
     return this.currentVersion;
@@ -20,7 +20,7 @@ export class AppUpdater {
     try {
       const res = await fetch('https://api.github.com/repos/hidooch980/Ryox-VPN/releases/latest', {
         headers: {
-          'User-Agent': 'RYOX-VPN-Updater/1.0.0',
+          'User-Agent': 'RYOX-VPN-Updater/1.1.0',
           'Accept': 'application/vnd.github.v3+json'
         },
         signal: AbortSignal.timeout(8000)
@@ -31,7 +31,7 @@ export class AppUpdater {
         return {
           version: this.currentVersion,
           releaseDate: new Date().toISOString(),
-          changelog: 'You are running the latest stable release of RYOX VPN v1.0.0.',
+          changelog: 'You are running the latest stable release of RYOX VPN v1.1.0.',
           hasUpdate: false
         };
       }

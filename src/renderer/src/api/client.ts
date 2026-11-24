@@ -85,7 +85,7 @@ if (typeof window !== 'undefined' && (window as any).AndroidBridge && !window.ry
     // Android ships as an APK signed by the same key; there is no in-app updater,
     // so report that honestly instead of throwing.
     checkForAppUpdates: async () => ({
-      version: '1.0.0',
+      version: '1.1.0',
       hasUpdate: false,
       changelog: 'In-app updates are not available on the Android build. Install a newer RYOX VPN APK to update.'
     }),
@@ -577,9 +577,9 @@ export const api = {
   async checkForAppUpdates() {
     if (window.ryoxApi) return window.ryoxApi.checkForAppUpdates();
     return {
-      version: '1.0.0',
+      version: '1.1.0',
       releaseDate: new Date().toISOString(),
-      changelog: 'You are on the latest official build of RYOX VPN v1.0.0.',
+      changelog: 'You are on the latest official build of RYOX VPN v1.1.0.',
       hasUpdate: false
     };
   },

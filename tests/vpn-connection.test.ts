@@ -1,4 +1,6 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { KillSwitch } from '../src/main/vpn/KillSwitch';
+import { ClashApiClient } from '../src/main/vpn/ClashApiClient';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as net from 'net';
 import * as os from 'os';
@@ -203,7 +205,7 @@ describe('VpnConnectionManager', () => {
 
     const core = new StubCoreManager();
     core.startDelayMs = 300;
-    const vpn = new VpnConnectionManager(core, baseSettings({ inboundSocksPort: inbound.port }));
+    const vpn = new VpnConnectionManager(core, baseSettings({ inboundSocksPort: inbound.port }), async () => true);
 
     const pending = vpn.connect(sampleServer);
     await new Promise((resolve) => setTimeout(resolve, 30));
@@ -216,12 +218,64 @@ describe('VpnConnectionManager', () => {
     expect(vpn.getState()).toBe('DISCONNECTED');
   });
 
+  it('fails a connection when required protection cannot arm', async () => {
+    const armed = vi.spyOn(KillSwitch, 'arm').mockResolvedValue(false);
+    try {
+      const vpn = new VpnConnectionManager(new StubCoreManager(), baseSettings({ killSwitch: true }));
+      expect(await vpn.connect(sampleServer)).toBe(false);
+      expect(vpn.getState()).toBe('ERROR');
+      expect(armed).toHaveBeenCalledOnce();
+    } finally {
+      armed.mockRestore();
+    }
+  });
+
+  it('keeps the firewall armed after a crash until explicit disconnect', async () => {
+    const inbound = await startFakeInbound();
+    cleanups.push(inbound.close);
+    const armed = vi.spyOn(KillSwitch, 'arm').mockResolvedValue(true);
+    const disarm = vi.spyOn(KillSwitch, 'disarm').mockResolvedValue(true);
+    try {
+      const core = new StubCoreManager();
+      const vpn = new VpnConnectionManager(core, baseSettings({ inboundSocksPort: inbound.port, killSwitch: true }), async () => true);
+      expect(await vpn.connect(sampleServer)).toBe(true);
+      core.simulateUnexpectedExit(1);
+      expect(await waitFor(() => vpn.getState() === 'ERROR')).toBe(true);
+      expect(vpn.getStats().killSwitchArmed).toBe(true);
+      expect(disarm).not.toHaveBeenCalled();
+      await vpn.disconnect();
+      expect(disarm).toHaveBeenCalledOnce();
+    } finally {
+      armed.mockRestore();
+      disarm.mockRestore();
+    }
+  });
+
+  it('rejects successful controller responses with missing counters', async () => {
+    const response = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}'));
+    try {
+      const client = new ClashApiClient('http://localhost');
+      expect(await client.sampleTraffic()).toBeNull();
+      expect(client.available).toBe(false);
+    } finally {
+      response.mockRestore();
+    }
+  });
+
+  it('rejects an open local port when the remote check fails', async () => {
+    const inbound = await startFakeInbound();
+    cleanups.push(inbound.close);
+    const vpn = new VpnConnectionManager(new StubCoreManager(), baseSettings({ inboundSocksPort: inbound.port }), async () => false);
+    expect(await vpn.connect(sampleServer)).toBe(false);
+    expect(vpn.getState()).toBe('ERROR');
+  });
+
   it('tears the session down when the core dies on its own', async () => {
     const inbound = await startFakeInbound();
     cleanups.push(inbound.close);
 
     const core = new StubCoreManager();
-    const vpn = new VpnConnectionManager(core, baseSettings({ inboundSocksPort: inbound.port }));
+    const vpn = new VpnConnectionManager(core, baseSettings({ inboundSocksPort: inbound.port }), async () => true);
 
     expect(await vpn.connect(sampleServer)).toBe(true);
     expect(vpn.getState()).toBe('CONNECTED');
@@ -240,7 +294,7 @@ describe('VpnConnectionManager', () => {
     cleanups.push(inbound.close);
 
     const core = new StubCoreManager();
-    const vpn = new VpnConnectionManager(core, baseSettings({ inboundSocksPort: inbound.port }));
+    const vpn = new VpnConnectionManager(core, baseSettings({ inboundSocksPort: inbound.port }), async () => true);
     const service = new SmartConnectService([], vpn);
 
     // Both nodes are 127.0.0.1 with the fake inbound port, so both probe as

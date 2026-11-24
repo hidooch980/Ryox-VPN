@@ -51,3 +51,29 @@
 .animate-fade-in {
   animation: fadeIn 0.25s ease-out forwards;
 }
+
+.ryox-shell {background:#101826;color:#e8eef5;font-family:Inter,Tahoma,system-ui,sans-serif}
+.ryox-shell header,.ryox-shell aside {background:#101c29;border-color:#314253}
+.ryox-shell main {background:#182534;padding:clamp(14px,3vw,44px)}
+.ryox-shell main > div {max-width:1200px;margin-inline:auto}
+.ryox-shell aside button[aria-current=page] {color:#d4ffe5;background:#234b42;border-color:#86dfb4}
+.ryox-shell :focus-visible {outline:2px solid #89dfb4;outline-offset:3px}
+.session-view {display:grid;gap:16px}
+.session-cover,.session-node,.session-metrics,.session-panels>section {border-radius:18px;border:1px solid #35495a}
+.session-cover {display:flex;justify-content:space-between;align-items:center;overflow:hidden;padding:clamp(24px,5vw,62px);background:#bbebce;color:#142c26}
+.session-cover h1,.session-view small {font-size:.84rem;font-weight:600}
+.session-cover h2 {font-size:clamp(2rem,5vw,4.2rem);font-weight:650;line-height:1.3;margin:12px 0 20px}
+.session-action {display:inline-flex;align-items:center;gap:10px;background:#173d34;color:white;border-radius:9px;padding:12px 22px}
+.session-signal {display:grid;place-items:center;border:1px solid #548e77;border-radius:50%;height:clamp(64px,11vw,150px);aspect-ratio:1;box-shadow:0 0 0 18px #85be9f44,0 0 0 36px #85be9f22}
+.session-signal svg {width:50%;height:50%;stroke-width:1.25}
+.session-node,.session-metrics,.session-panels>section {background:#1e3040;padding:clamp(14px,2vw,25px)}
+.session-node {display:flex;align-items:center;gap:16px;text-align:start}.session-node span {min-width:0;flex:1}.session-node strong {display:block;overflow-wrap:anywhere;font-size:1.15rem}
+.session-view small,.session-view dt {color:#b5c6d1}.session-node svg,.session-node bdi {color:#a6e5bf}
+.session-metrics {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px}
+.session-metrics strong {display:block;text-align:start;width:fit-content;font-size:clamp(1.05rem,2vw,1.65rem);font-variant-numeric:tabular-nums}
+.session-panels {display:grid;grid-template-columns:1.2fr 1fr;gap:16px}.session-panels>section {min-width:0}
+.session-view h3 {font-size:1.15rem;font-weight:650;margin-bottom:18px}.session-view dl>div {display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #35495a;padding:7px 0;font-size:.85rem}
+.session-view dd {overflow-wrap:anywhere}.session-error {text-align:start;padding:14px;background:#573d2f;border-radius:12px;color:#ffddb5}
+.mobile-tabs {display:none}
+@media(max-width:767px){.session-panels {grid-template-columns:1fr}.session-metrics{grid-template-columns:1fr 1fr}.session-cover{gap:20px}.mobile-tabs{display:grid;grid-template-columns:repeat(4,1fr);background:#101c29;padding:6px 6px max(6px,env(safe-area-inset-bottom));border-top:1px solid #35495a}.mobile-tabs button{min-height:42px;color:#b5c6d1;font-size:.85rem}.mobile-tabs [aria-current]{background:#234b42;color:#d4ffe5;border-radius:8px}.ryox-shell{height:100dvh}}
+@media(prefers-reduced-motion:reduce){.ryox-shell *, .ryox-shell *::before,.ryox-shell *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}

@@ -44,7 +44,7 @@ export const AppUpdatesPage: React.FC = () => {
         <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
           <div>
             <span className="text-xs text-slate-400 block">CURRENT INSTALLED VERSION</span>
-            <span className="text-lg font-bold font-mono text-cyan-400">v1.0.0 (Official Stable Release)</span>
+            <span className="text-lg font-bold font-mono text-cyan-400">v1.1.0 (Official Stable Release)</span>
           </div>
 
           <div className="text-right">

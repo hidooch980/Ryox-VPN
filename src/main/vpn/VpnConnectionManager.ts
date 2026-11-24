@@ -1,3 +1,5 @@
+import { execFile } from 'child_process';
+import { join } from 'path';
 import { EventEmitter } from 'events';
 import { ConnectionState, VpnServerConfig, AppSettings, LiveStats } from '../../shared/types';
 import { CoreManager } from '../core/CoreManager';
@@ -15,6 +17,18 @@ const LOCAL_ENDPOINT_TIMEOUT_MS = 5000;
 const CLASH_POLL_MS = 1000;
 /** Consecutive controller failures tolerated before falling back. */
 const CLASH_MAX_FAILURES = 3;
+
+// Ask an HTTPS endpoint through the core's SOCKS listener. curl verifies TLS,
+// resolves the remote hostname inside the proxy and enforces a total deadline.
+export function verifyTunnel(port: number): Promise<boolean> {
+  const curl = process.platform === 'win32' ? join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'curl.exe') : 'curl';
+  return new Promise(resolve => {
+    execFile(curl, ['--disable', '--silent', '--output', process.platform === 'win32' ? 'NUL' : '/dev/null',
+      '--write-out', '%{http_code}', '--max-time', '8', '--noproxy', '', '--proxy',
+      `socks5h://127.0.0.1:${port}`, 'https://connectivitycheck.gstatic.com/generate_204'],
+      { windowsHide: true, timeout: 9500 }, (error, status) => resolve(!error && status === '204'));
+  });
+}
 
 export class VpnConnectionManager extends EventEmitter {
   private state: ConnectionState = 'DISCONNECTED';
@@ -65,8 +79,9 @@ export class VpnConnectionManager extends EventEmitter {
    * with a phantom CONNECTED state and an armed system proxy.
    */
   private attempt = 0;
+  private userIntent = 0;
 
-  constructor(coreManager: CoreManager, settings: AppSettings) {
+  constructor(coreManager: CoreManager, settings: AppSettings, private readonly probeTunnel = verifyTunnel) {
     super();
     this.coreManager = coreManager;
     this.settings = settings;
@@ -113,8 +128,14 @@ export class VpnConnectionManager extends EventEmitter {
   }
 
   public async connect(server: VpnServerConfig): Promise<boolean> {
-    if (this.state === 'CONNECTING' || this.state === 'CONNECTED') {
-      await this.disconnect();
+    return this.connectTo(server, ++this.userIntent);
+  }
+
+  private async connectTo(server: VpnServerConfig, intent: number): Promise<boolean> {
+    if (this.state === 'CONNECTING' || this.state === 'VERIFYING' || this.state === 'CONNECTED') {
+      this.attempt += 1;
+      await this.teardown();
+      if (intent !== this.userIntent) return false;
     }
 
     // Snapshot the settings for this attempt: `settings:save` swaps the shared
@@ -149,7 +170,7 @@ export class VpnConnectionManager extends EventEmitter {
       // Step 2: Configure System Proxy if in SystemProxy mode
       if (settings.tunnelMode === 'SystemProxy') {
         this.emitLog('INFO', `Applying Windows system proxy on port ${localPort}...`);
-        const applied = await SystemProxyManager.enableProxy(localPort);
+        const applied = await SystemProxyManager.enableProxy((server.core || settings.activeCore) === 'xray' ? settings.inboundHttpPort || 10809 : localPort);
         if (!this.isCurrent(myAttempt)) return false;
         if (!applied) {
           this.emitLog('ERROR', 'Could not apply the Windows system proxy; refusing to report a connected tunnel.');
@@ -168,11 +189,7 @@ export class VpnConnectionManager extends EventEmitter {
         if (armed) {
           this.emitLog('INFO', 'Kill Switch armed: outbound traffic is restricted to the VPN core.');
         } else {
-          this.emitLog(
-            'WARN',
-            'Kill Switch could not be armed (administrator rights are required to modify Windows Firewall). ' +
-              'Traffic may leak outside the tunnel.'
-          );
+          throw new Error('Kill Switch could not be armed. Check administrator rights and firewall settings.');
         }
       }
 
@@ -184,12 +201,15 @@ export class VpnConnectionManager extends EventEmitter {
 
       const verified = await this.verifyLocalEndpoint(localPort, LOCAL_ENDPOINT_TIMEOUT_MS);
       if (!this.isCurrent(myAttempt)) return false;
-      if (!verified) {
+      if (!verified || !(await this.probeTunnel(localPort))) {
+        if (!this.isCurrent(myAttempt)) return false;
         this.emitLog('ERROR', `Nothing accepts connections on 127.0.0.1:${localPort} — the tunnel is not usable.`);
         await this.teardown();
         this.setState('ERROR');
         return false;
       }
+
+      if (!this.isCurrent(myAttempt)) return false;
 
       // Step 5: Transition to CONNECTED
       this.sessionStartTime = Date.now();
@@ -208,6 +228,7 @@ export class VpnConnectionManager extends EventEmitter {
   }
 
   public async disconnect(): Promise<void> {
+    this.userIntent += 1;
     if (this.state === 'DISCONNECTED') return;
 
     // Invalidate any in-flight connect before tearing anything down.
@@ -231,8 +252,7 @@ export class VpnConnectionManager extends EventEmitter {
 
     // Disarm Kill Switch
     if (this.killSwitchArmed) {
-      await KillSwitch.disarm();
-      this.killSwitchArmed = false;
+      this.killSwitchArmed = !(await KillSwitch.disarm());
     }
 
     // Stop Core Engine
@@ -240,6 +260,11 @@ export class VpnConnectionManager extends EventEmitter {
 
     this.activeServer = undefined;
     this.sessionStartTime = 0;
+    if (this.killSwitchArmed) {
+      this.setState('ERROR');
+      this.emitLog('ERROR', 'Could not restore the firewall policy. Retry disconnect with administrator rights.');
+      return;
+    }
     this.setState('DISCONNECTED');
     this.emitLog('INFO', 'VPN disconnected. Network returned to normal.');
   }
@@ -267,15 +292,10 @@ export class VpnConnectionManager extends EventEmitter {
     this.stopTelemetryLoop();
 
     await SystemProxyManager.disableProxy();
-    if (this.killSwitchArmed) {
-      await KillSwitch.disarm();
-      this.killSwitchArmed = false;
-    }
-
     this.activeServer = undefined;
     this.sessionStartTime = 0;
     this.setState('ERROR');
-    this.emitLog('WARN', 'Networking defaults were restored. Reconnect when you are ready.');
+    this.emitLog('WARN', 'Tunnel lost. Reconnect or disconnect to restore your network settings.');
   }
 
   /**
@@ -286,7 +306,9 @@ export class VpnConnectionManager extends EventEmitter {
     if (this.state !== 'CONNECTED') return;
 
     const port = this.settings.inboundSocksPort || 10808;
-    const stillUp = this.coreManager.isRunning() && (await this.verifyLocalEndpoint(port, 2000));
+    const attempt = this.attempt;
+    const stillUp = this.coreManager.isRunning() && (await this.probeTunnel(port));
+    if (attempt !== this.attempt) return;
 
     if (stillUp) {
       this.emitLog('INFO', 'Resumed from sleep: the tunnel is still reachable.');
@@ -468,7 +490,14 @@ export class VpnConnectionManager extends EventEmitter {
       this.autoSwitchCount += 1;
       this.emitLog('WARN', `Health dropped below threshold — switching to "${replacement.name}".`);
       // connect() bumps the attempt token itself, which cancels this loop.
-      await this.connect(replacement);
+      const intent = this.userIntent;
+        if (await this.connectTo(replacement, intent)) {
+          this.autoSwitchCount += 1;
+          this.emitStats();
+        } else if (this.userIntent === intent && this.getState() === 'ERROR') {
+          this.emitLog('WARN', 'Replacement failed. Reconnecting to the previous server.');
+          await this.connectTo(current, intent);
+        }
     } catch (err) {
       this.emitLog('WARN', `Automatic node switch failed: ${(err as Error).message}`);
     } finally {

@@ -14,7 +14,7 @@ describe('AppUpdater & Checksum Verification', () => {
     expect(isTampered).toBe(false);
   });
 
-  it('should report current stable version as 1.0.0', () => {
-    expect(AppUpdater.getCurrentVersion()).toBe('1.0.0');
+  it('should report current stable version from the package manifest', () => {
+    expect(AppUpdater.getCurrentVersion()).toBe(require('../package.json').version);
   });
 });

@@ -18,8 +18,8 @@ const REQUEST_TIMEOUT_MS = 1500;
 const MIN_ELAPSED_SECONDS = 0.2;
 
 interface ConnectionsSnapshot {
-  downloadTotal?: number;
-  uploadTotal?: number;
+  downloadTotal: number;
+  uploadTotal: number;
 }
 
 export class ClashApiClient {
@@ -89,6 +89,11 @@ export class ClashApiClient {
       }
 
       const body = (await response.json()) as ConnectionsSnapshot;
+      if (!body || !Number.isSafeInteger(body.downloadTotal) || body.downloadTotal < 0 ||
+          !Number.isSafeInteger(body.uploadTotal) || body.uploadTotal < 0) {
+        this.availableFlag = false;
+        return null;
+      }
       this.availableFlag = true;
       return body;
     } catch {

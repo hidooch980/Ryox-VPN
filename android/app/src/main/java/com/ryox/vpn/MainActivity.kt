@@ -207,7 +207,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun notifyStateToWeb() {
         if (!::webView.isInitialized) return
-        val state = if (RyoxVpnService.isRunning) "CONNECTED" else "DISCONNECTED"
+        val state = RyoxVpnService.connectionState
         webView.post {
             webView.evaluateJavascript(
                 "if (window._onAndroidStateChanged) window._onAndroidStateChanged('$state');",

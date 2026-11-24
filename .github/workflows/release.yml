@@ -6,7 +6,11 @@ on:
       - 'v*'
 
 jobs:
+  android:
+    uses: ./.github/workflows/android-build.yml
+
   create-release:
+    needs: android
     runs-on: windows-latest
     permissions:
       contents: write
@@ -49,9 +53,15 @@ jobs:
         run: npm run validate:cores
 
       - name: Package Windows Executables
-        run: npx electron-builder --win nsis zip --x64
+        run: npx electron-builder --win nsis zip --x64 --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Include Android package
+        uses: actions/download-artifact@v4
+        with:
+          name: RYOX-VPN-v1.1.0-APK
+          path: dist-packaged
 
       - name: Generate Checksums
         shell: pwsh
@@ -75,6 +85,7 @@ jobs:
         with:
           files: |
             dist-packaged/*.exe
+            dist-packaged/*.apk
             dist-packaged/*.zip
             dist-packaged/SHA256SUMS.txt
           draft: false

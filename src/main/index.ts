@@ -315,7 +315,7 @@ function createTray() {
   tray.setToolTip('RYOX VPN — 100% Free Forever');
 
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'RYOX VPN v1.0.0', enabled: false },
+    { label: 'RYOX VPN v1.1.0', enabled: false },
     { type: 'separator' },
     {
       label: 'Open Dashboard',

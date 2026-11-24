@@ -168,7 +168,7 @@ export const App: React.FC = () => {
   };
 
   const handleConnectToggle = async () => {
-    if (stats.connectionState === 'CONNECTED' || stats.connectionState === 'CONNECTING' || stats.connectionState === 'VERIFYING') {
+    if ((stats.connectionState === 'ERROR' && stats.killSwitchArmed) || stats.connectionState === 'CONNECTED' || stats.connectionState === 'CONNECTING' || stats.connectionState === 'VERIFYING') {
       await api.disconnect();
     } else if (selectedServer) {
       await api.connect(selectedServer);
@@ -177,13 +177,13 @@ export const App: React.FC = () => {
 
   return (
     <div 
-      className="h-screen w-screen bg-[#05070d] text-slate-100 flex flex-col overflow-hidden font-sans select-none"
+      className="ryox-shell h-screen w-screen bg-[#05070d] text-slate-100 flex flex-col overflow-hidden font-sans select-none"
       dir={settings.language === 'fa' ? 'rtl' : 'ltr'}
     >
       {/* Top TitleBar */}
       <TitleBar
         state={stats.connectionState}
-        activeServerName={selectedServer?.name}
+        activeServerName={stats.activeServer?.name ?? selectedServer?.name}
         pingMs={stats.pingMs}
         onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
       />
@@ -206,6 +206,7 @@ export const App: React.FC = () => {
           flex h-full shadow-2xl md:shadow-none
         `}>
           <Sidebar
+            persian={settings.language === 'fa'}
             activePage={activePage}
             onSelectPage={(page) => {
               setActivePage(page);
@@ -216,7 +217,7 @@ export const App: React.FC = () => {
         </div>
 
         {/* Content Viewport */}
-        <main className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900/30 via-slate-950/80 to-[#05070d]">
+        <main className="min-w-0 flex-1 overflow-y-auto p-3 sm:p-6 custom-scrollbar bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900/30 via-slate-950/80 to-[#05070d]">
           {activePage === 'dashboard' && (
             <DashboardPage
               stats={stats}
@@ -340,6 +341,12 @@ export const App: React.FC = () => {
           )}
         </main>
       </div>
+      <nav className="mobile-tabs" aria-label={settings.language === 'fa' ? 'ناوبری اصلی' : 'Main navigation'}>
+        {([['dashboard','اتصال','Connection'], ['servers','سرورها','Servers'], ['logs','گزارش','Logs'], ['settings','تنظیمات','Settings']] as const).map(([id,fa,en]) =>
+          <button key={id} aria-current={activePage === id ? 'page' : undefined} onClick={() => { setActivePage(id); setIsSidebarOpen(false); }}>
+            {settings.language === 'fa' ? fa : en}
+          </button>)}
+      </nav>
     </div>
   );
 };

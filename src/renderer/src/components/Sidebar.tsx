@@ -42,49 +42,50 @@ export type PageId =
   | 'about';
 
 interface SidebarProps {
+  persian: boolean;
   activePage: PageId;
   onSelectPage: (page: PageId) => void;
   serverCount: number;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activePage, onSelectPage, serverCount }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ activePage, onSelectPage, serverCount, persian }) => {
   const navSections = [
     {
       title: 'OVERVIEW',
       items: [
-        { id: 'dashboard' as PageId, label: 'Dashboard', icon: LayoutDashboard },
-        { id: 'servers' as PageId, label: 'Servers', icon: Server, badge: serverCount },
-        { id: 'subscriptions' as PageId, label: 'Subscriptions', icon: Rss },
-        { id: 'free-sources' as PageId, label: 'Free Sources', icon: Globe2 },
-        { id: 'world-map' as PageId, label: 'نقشه سرورها', icon: Globe2 }
+        { id: 'dashboard' as PageId, label: persian ? 'داشبورد' : 'Dashboard', icon: LayoutDashboard },
+        { id: 'servers' as PageId, label: persian ? 'سرورها' : 'Servers', icon: Server, badge: serverCount },
+        { id: 'subscriptions' as PageId, label: persian ? 'اشتراک‌ها' : 'Subscriptions', icon: Rss },
+        { id: 'free-sources' as PageId, label: persian ? 'منابع رایگان' : 'Free Sources', icon: Globe2 },
+        { id: 'world-map' as PageId, label: persian ? 'نقشهٔ سرورها' : 'Server map', icon: Globe2 }
       ]
     },
     {
       title: 'ENGINE & PROTOCOLS',
       items: [
-        { id: 'core-manager' as PageId, label: 'Core Manager', icon: Cpu },
-        { id: 'protocol-manager' as PageId, label: 'Protocols', icon: Layers },
-        { id: 'config-editor' as PageId, label: 'Config Editor', icon: FileCode }
+        { id: 'core-manager' as PageId, label: persian ? 'مدیریت هسته‌ها' : 'Core Manager', icon: Cpu },
+        { id: 'protocol-manager' as PageId, label: persian ? 'پروتکل‌ها' : 'Protocols', icon: Layers },
+        { id: 'config-editor' as PageId, label: persian ? 'ویرایش پیکربندی' : 'Config Editor', icon: FileCode }
       ]
     },
     {
       title: 'NETWORKING & SECURITY',
       items: [
-        { id: 'routing' as PageId, label: 'Routing Rules', icon: GitFork },
-        { id: 'dns' as PageId, label: 'DNS Settings', icon: Network },
-        { id: 'split-tunneling' as PageId, label: 'Split Tunneling', icon: Split },
-        { id: 'diagnostics' as PageId, label: 'Diagnostics', icon: Activity },
-        { id: 'logs' as PageId, label: 'Live Logs', icon: Terminal }
+        { id: 'routing' as PageId, label: persian ? 'مسیریابی' : 'Routing Rules', icon: GitFork },
+        { id: 'dns' as PageId, label: persian ? 'تنظیمات DNS' : 'DNS Settings', icon: Network },
+        { id: 'split-tunneling' as PageId, label: persian ? 'تونل تفکیکی' : 'Split Tunneling', icon: Split },
+        { id: 'diagnostics' as PageId, label: persian ? 'عیب‌یابی' : 'Diagnostics', icon: Activity },
+        { id: 'logs' as PageId, label: persian ? 'گزارش زنده' : 'Live Logs', icon: Terminal }
       ]
     },
     {
       title: 'UPDATES & SYSTEM',
       items: [
-        { id: 'app-updates' as PageId, label: 'App Updates', icon: RefreshCw },
-        { id: 'core-updates' as PageId, label: 'Core Updates', icon: DownloadCloud },
-        { id: 'appearance' as PageId, label: 'Appearance', icon: Palette },
-        { id: 'settings' as PageId, label: 'Settings', icon: Settings },
-        { id: 'about' as PageId, label: 'About Ryox', icon: Info }
+        { id: 'app-updates' as PageId, label: persian ? 'به‌روزرسانی برنامه' : 'App Updates', icon: RefreshCw },
+        { id: 'core-updates' as PageId, label: persian ? 'به‌روزرسانی هسته‌ها' : 'Core Updates', icon: DownloadCloud },
+        { id: 'appearance' as PageId, label: persian ? 'ظاهر' : 'Appearance', icon: Palette },
+        { id: 'settings' as PageId, label: persian ? 'تنظیمات' : 'Settings', icon: Settings },
+        { id: 'about' as PageId, label: persian ? 'دربارهٔ رایوکس' : 'About Ryox', icon: Info }
       ]
     }
   ];
@@ -101,7 +102,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activePage, onSelectPage, serv
         {navSections.map((sec, idx) => (
           <div key={idx}>
             <div className="px-3 mb-1 text-[10px] font-mono font-bold tracking-widest text-slate-500 uppercase">
-              {sec.title}
+              {persian ? ['نمای کلی', 'هسته و پروتکل', 'شبکه و امنیت', 'برنامه'][idx] : sec.title}
             </div>
             <div className="space-y-0.5">
               {sec.items.map((item) => {
@@ -110,10 +111,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ activePage, onSelectPage, serv
                 return (
                   <button
                     key={item.id}
+                    aria-current={isActive ? "page" : undefined}
                     onClick={() => onSelectPage(item.id)}
                     className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 group ${
                       isActive
-                        ? 'bg-gradient-to-r from-cyan-500/15 to-transparent border-l-2 border-cyan-400 text-cyan-300 font-semibold shadow-inner'
+                        ? 'bg-gradient-to-r from-cyan-500/15 to-transparent border-s-2 border-cyan-400 text-cyan-300 font-semibold shadow-inner'
                         : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
                     }`}
                   >

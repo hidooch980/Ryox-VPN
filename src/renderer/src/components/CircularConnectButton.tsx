@@ -5,10 +5,11 @@ import { ConnectionState } from '../../../shared/types';
 interface CircularConnectButtonProps {
   state: ConnectionState;
   onToggle: () => void;
+  label: string;
   disabled?: boolean;
 }
 
-export const CircularConnectButton: React.FC<CircularConnectButtonProps> = ({ state, onToggle, disabled }) => {
+export const CircularConnectButton: React.FC<CircularConnectButtonProps> = ({ state, onToggle, disabled, label }) => {
   const isConnected = state === 'CONNECTED';
   const isConnecting = state === 'CONNECTING' || state === 'VERIFYING';
   const isDisconnecting = state === 'DISCONNECTING';
@@ -45,9 +46,10 @@ export const CircularConnectButton: React.FC<CircularConnectButtonProps> = ({ st
 
         {/* Main Connect Power Button */}
         <button
+          aria-label={label}
           onClick={onToggle}
           disabled={disabled || isDisconnecting}
-          className={`relative w-36 h-36 rounded-full flex flex-col items-center justify-center transition-all duration-500 focus:outline-none group active:scale-95 ${
+          className={`relative w-36 h-36 rounded-full flex flex-col items-center justify-center transition-all duration-500 focus-visible:outline-cyan-300 group active:scale-95 ${
             isConnected
               ? 'bg-gradient-to-b from-emerald-950/80 to-slate-950 border-2 border-emerald-500/70 shadow-[0_0_35px_rgba(16,185,129,0.35)] hover:shadow-[0_0_45px_rgba(16,185,129,0.5)]'
               : isConnecting
@@ -80,11 +82,9 @@ export const CircularConnectButton: React.FC<CircularConnectButtonProps> = ({ st
             ? 'text-amber-400 animate-pulse'
             : 'text-slate-400'
         }`}>
-          {isConnected ? 'DISCONNECT' : isConnecting ? 'CONNECTING...' : 'CLICK TO CONNECT'}
+          {label}
         </span>
-        <p className="text-[11px] text-slate-500 font-sans mt-0.5">
-          {isConnected ? 'Protected & Encrypted' : 'Encrypted with Multi-Core'}
-        </p>
+
       </div>
     </div>
   );

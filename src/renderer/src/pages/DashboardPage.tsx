@@ -1,20 +1,7 @@
 import React from 'react';
-import { 
-  ArrowDownCircle, 
-  ArrowUpCircle, 
-  Clock, 
-  Wifi, 
-  Globe, 
-  Server, 
-  ChevronRight, 
-  Zap,
-  Shield,
-  Layers,
-  Activity
-} from 'lucide-react';
-import { CircularConnectButton } from '../components/CircularConnectButton';
+import { Activity, Power, Server } from 'lucide-react';
 import { SpeedChart } from '../components/SpeedChart';
-import { VpnServerConfig, LiveStats, ConnectionState, AppSettings } from '../../../shared/types';
+import { VpnServerConfig, LiveStats, AppSettings } from '../../../shared/types';
 import { PageId } from '../components/Sidebar';
 
 interface DashboardPageProps {
@@ -38,24 +25,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 }) => {
   const isConnected = stats.connectionState === 'CONNECTED';
 
-  const healthScore =
-    typeof stats.healthScore === 'number' && Number.isFinite(stats.healthScore)
-      ? stats.healthScore
-      : undefined;
-  const healthTone =
-    healthScore === undefined
-      ? 'text-slate-500'
-      : healthScore >= 70
-        ? 'text-emerald-400'
-        : healthScore >= 40
-          ? 'text-amber-400'
-          : 'text-red-400';
-  const telemetryLabel =
-    stats.telemetrySource === 'clash-api'
-      ? 'Core API'
-      : stats.telemetrySource === 'process-counters'
-        ? 'Process counters'
-        : '—';
+  const fa = settings.language === 'fa';
+  const chooseServer = !selectedServer && ['DISCONNECTED', 'ERROR'].includes(stats.connectionState) && !stats.killSwitchArmed;
+  const disconnect = isConnected || (stats.connectionState === 'ERROR' && stats.killSwitchArmed);
+  const connecting = ['CONNECTING', 'VERIFYING'].includes(stats.connectionState);
+  const actionLabel = chooseServer ? (fa ? 'انتخاب سرور' : 'Choose server')
+    : disconnect ? (fa ? 'قطع اتصال' : 'Disconnect')
+    : connecting ? (fa ? 'لغو اتصال' : 'Cancel connection')
+    : stats.connectionState === 'DISCONNECTING' ? (fa ? 'در حال قطع اتصال' : 'Disconnecting')
+    : (fa ? 'اتصال' : 'Connect');
 
   // Format helpers
   const formatSpeed = (bytesPerSec: number) => {
@@ -76,220 +54,51 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     return `${hrs > 0 ? `${hrs}:` : ''}${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const node = isConnected ? stats.activeServer ?? selectedServer : selectedServer;
+  const android = Boolean(window.AndroidBridge);
+  const title = isConnected ? (fa ? 'متصل' : 'Connected') : connecting ? (fa ? 'در حال بررسی اتصال' : 'Checking connection')
+    : stats.connectionState === 'ERROR' ? (fa ? 'اتصال ناموفق' : 'Connection failed')
+    : stats.connectionState === 'DISCONNECTING' ? (fa ? 'در حال قطع اتصال' : 'Disconnecting') : (fa ? 'قطع اتصال' : 'Disconnected');
+  const metrics = [
+    [fa ? 'دریافت' : 'Download', formatSpeed(stats.downloadSpeed)],
+    [fa ? 'ارسال' : 'Upload', formatSpeed(stats.uploadSpeed)],
+    [fa ? 'حجم مصرفی' : 'Transferred', formatBytes(stats.totalUpload + stats.totalDownload)],
+    [fa ? 'مدت اتصال' : 'Duration', formatDuration(stats.sessionDuration)]
+  ];
+  const details = [
+    [fa ? 'هسته' : 'Engine', android ? 'sing-box' : stats.activeCore],
+    [fa ? 'مسیر اتصال' : 'Mode', android ? (fa ? 'پروکسی سیستم' : 'System proxy') : settings.tunnelMode],
+    [fa ? 'تأخیر' : 'Latency', isConnected && stats.pingMs > 0 ? `${stats.pingMs} ms` : '—'],
+    [fa ? 'نشانی خروجی' : 'Exit IP', isConnected ? stats.clientIp || '—' : '—'],
+    [fa ? 'سلامت سرور' : 'Node health', isConnected && stats.healthScore != null ? `${stats.healthScore}/100` : '—'],
+    [fa ? 'تعویض خودکار' : 'Auto switches', String(stats.autoSwitchCount ?? 0)],
+    ...(!android ? [[fa ? 'محافظ قطع اتصال' : 'Kill switch', stats.killSwitchArmed ? (fa ? 'فعال' : 'Armed') : (fa ? 'غیرفعال' : 'Off')]] : [])
+  ];
+
   return (
-    <div className="space-y-6">
-      {/* Top Banner: Core & Status Summary */}
-      <div className="flex items-center justify-between bg-slate-900/40 border border-slate-800/80 rounded-2xl p-4 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
-            <Zap className="w-5 h-5 drop-shadow-[0_0_8px_#00e5ff]" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-300">ACTIVE ENGINE:</span>
-              <span className="text-xs font-mono font-bold text-cyan-400 uppercase bg-cyan-950/60 border border-cyan-500/30 px-2 py-0.5 rounded">
-                {stats.activeCore.toUpperCase()}
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              Mode: {settings.tunnelMode === 'TUN' ? 'Native Wintun TUN (Full System)' : 'System Proxy (WinINet)'} • {settings.routingMode} Routing
-            </p>
-          </div>
+    <div className="session-view">
+      <section className="session-cover">
+        <div>
+          <h1>{fa ? 'اتصال شبکه' : 'Network connection'}</h1>
+          <h2 aria-live="polite">{title}</h2>
+          <button className="session-action" disabled={stats.connectionState === 'DISCONNECTING'}
+            onClick={chooseServer ? () => onNavigate('servers') : onConnectToggle}>
+            <Power size={18} />{actionLabel}
+          </button>
         </div>
-
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-mono text-slate-400">Kill Switch:</span>
-          <span
-            title={
-              stats.killSwitchArmed
-                ? 'Windows Firewall rules are installed: traffic is restricted to the VPN core.'
-                : settings.killSwitch
-                  ? 'Requested in settings, but firewall rules could not be installed. Run RYOX VPN as administrator to enforce it.'
-                  : 'Kill switch is disabled in settings.'
-            }
-            className={`text-xs font-mono px-2 py-0.5 rounded font-bold ${
-              stats.killSwitchArmed
-                ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-500/30'
-                : settings.killSwitch
-                  ? 'bg-amber-950/80 text-amber-400 border border-amber-500/30'
-                  : 'bg-slate-800 text-slate-400'
-            }`}
-          >
-            {stats.killSwitchArmed ? 'ARMED' : settings.killSwitch ? 'UNAVAILABLE' : 'OFF'}
-          </span>
-        </div>
-      </div>
-
-      {/* Centerpiece: Connect Button & Active Node Selector */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-center">
-        {/* Left Column: Quick Node Switcher Card */}
-        <div className="bg-slate-900/50 border border-slate-800/80 rounded-2xl p-4 backdrop-blur-md space-y-4">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold font-mono tracking-wider text-slate-400 uppercase">SELECTED NODE</span>
-            <button 
-              onClick={() => onNavigate('servers')}
-              className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-medium transition-colors"
-            >
-              All Servers ({servers.length})
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {selectedServer ? (
-            <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-sm text-slate-200 truncate max-w-[200px]">
-                  {selectedServer.name}
-                </span>
-                <span className="text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800/50">
-                  {selectedServer.protocol}
-                </span>
-              </div>
-              <div className="text-[11px] font-mono text-slate-400 flex items-center justify-between">
-                <span>{selectedServer.server}:{selectedServer.port}</span>
-                {(selectedServer.latency ?? 0) > 0 && (
-                  <span className="text-emerald-400">{selectedServer.latency} ms</span>
-                )}
-              </div>
-              {selectedServer.tls && selectedServer.tls !== 'none' && (
-                <div className="text-[10px] text-slate-500 flex items-center gap-1">
-                  <Shield className="w-3 h-3 text-cyan-400" />
-                  <span>Security: {selectedServer.tls.toUpperCase()}{selectedServer.flow ? ` (${selectedServer.flow})` : ''}</span>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="p-4 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
-              No server selected. Please choose a node from Servers page.
-            </div>
-          )}
-
-          {/* Location & IP Details */}
-          <div className="pt-2 border-t border-slate-800/60 space-y-2 text-xs">
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="flex items-center gap-1.5">
-                <Globe className="w-3.5 h-3.5 text-slate-500" />
-                Virtual IP:
-              </span>
-              <span className="font-mono text-slate-300">
-                {isConnected ? (stats.clientIp || '—') : 'Direct (Unprotected)'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="flex items-center gap-1.5">
-                <Wifi className="w-3.5 h-3.5 text-slate-500" />
-                Tunnel Latency:
-              </span>
-              <span className="font-mono text-cyan-400">
-                {isConnected ? `${stats.pingMs} ms` : '—'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="flex items-center gap-1.5">
-                <Activity className="w-3.5 h-3.5 text-slate-500" />
-                Node Health:
-              </span>
-              <span className={`font-mono ${healthTone}`}>
-                {isConnected && healthScore !== undefined ? `${Math.round(healthScore)}/100` : '—'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-slate-500" />
-                Telemetry Source:
-              </span>
-              <span className="font-mono text-slate-300">
-                {isConnected ? telemetryLabel : '—'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="flex items-center gap-1.5">
-                <Zap className="w-3.5 h-3.5 text-slate-500" />
-                Auto Switches:
-              </span>
-              <span className={`font-mono ${isConnected && stats.autoSwitchCount && stats.autoSwitchCount > 0 ? 'text-amber-400' : 'text-slate-500'}`}>
-                {isConnected ? (stats.autoSwitchCount && stats.autoSwitchCount > 0 ? stats.autoSwitchCount : '0') : '—'}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Center: Connect Button */}
-        <div className="flex justify-center">
-          <CircularConnectButton
-            state={stats.connectionState}
-            onToggle={onConnectToggle}
-            disabled={!selectedServer}
-          />
-        </div>
-
-        {/* Right Column: Speed Chart & Bandwidth */}
-        <div className="space-y-4">
-          <div className="bg-slate-900/50 border border-slate-800/80 rounded-2xl p-4 backdrop-blur-md space-y-3">
-            <span className="text-xs font-bold font-mono tracking-wider text-slate-400 uppercase">
-              NETWORK TELEMETRY
-            </span>
-            <SpeedChart
-              uploadSpeed={stats.uploadSpeed}
-              downloadSpeed={stats.downloadSpeed}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom Metric Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {/* Download Speed */}
-        <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-3.5 backdrop-blur-md flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
-            <ArrowDownCircle className="w-5 h-5" />
-          </div>
-          <div>
-            <span className="text-[10px] font-mono font-bold text-slate-500 uppercase">DOWNLOAD</span>
-            <div className="text-base font-bold font-mono text-slate-100">
-              {formatSpeed(stats.downloadSpeed)}
-            </div>
-          </div>
-        </div>
-
-        {/* Upload Speed */}
-        <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-3.5 backdrop-blur-md flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
-            <ArrowUpCircle className="w-5 h-5" />
-          </div>
-          <div>
-            <span className="text-[10px] font-mono font-bold text-slate-500 uppercase">UPLOAD</span>
-            <div className="text-base font-bold font-mono text-slate-100">
-              {formatSpeed(stats.uploadSpeed)}
-            </div>
-          </div>
-        </div>
-
-        {/* Transferred Total */}
-        <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-3.5 backdrop-blur-md flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-            <Layers className="w-5 h-5" />
-          </div>
-          <div>
-            <span className="text-[10px] font-mono font-bold text-slate-500 uppercase">TOTAL DATA</span>
-            <div className="text-base font-bold font-mono text-slate-100">
-              {formatBytes(stats.totalDownload + stats.totalUpload)}
-            </div>
-          </div>
-        </div>
-
-        {/* Session Duration */}
-        <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-3.5 backdrop-blur-md flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
-            <Clock className="w-5 h-5" />
-          </div>
-          <div>
-            <span className="text-[10px] font-mono font-bold text-slate-500 uppercase">DURATION</span>
-            <div className="text-base font-bold font-mono text-slate-100">
-              {formatDuration(stats.sessionDuration)}
-            </div>
-          </div>
-        </div>
+        <div className="session-signal" aria-hidden="true"><Activity /></div>
+      </section>
+      {stats.connectionState === 'ERROR' && <button className="session-error" onClick={() => onNavigate('logs')}>
+        {fa ? 'مشاهدهٔ گزارش خطای اتصال' : 'View connection error log'} {stats.killSwitchArmed && (fa ? ' · محافظ فعال است' : ' · Kill switch armed')}
+      </button>}
+      <button className="session-node" onClick={() => onNavigate('servers')}>
+        <Server /><span><small>{fa ? 'سرور' : 'Server'}</small><strong>{node?.name || (fa ? 'انتخاب سرور' : 'Choose a server')}</strong></span>
+        <bdi>{node?.protocol.toUpperCase() ?? servers.length}</bdi>
+      </button>
+      <div className="session-metrics">{metrics.map(([key,value]) => <div key={key}><small>{key}</small><strong dir="ltr">{value}</strong></div>)}</div>
+      <div className="session-panels">
+        <section><h3>{fa ? 'ترافیک شبکه' : 'Network traffic'}</h3><SpeedChart uploadSpeed={stats.uploadSpeed} downloadSpeed={stats.downloadSpeed} /></section>
+        <section><h3>{fa ? 'جزئیات اتصال' : 'Connection details'}</h3><dl>{details.map(([key,value]) => <div key={key}><dt>{key}</dt><dd><bdi>{value}</bdi></dd></div>)}</dl></section>
       </div>
     </div>
   );

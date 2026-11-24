@@ -35,7 +35,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ state, activeServerName, pin
           RYOX <span className="text-cyan-400 font-normal">VPN</span>
         </span>
         <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800/60 text-slate-400 border border-slate-700/50 hidden sm:inline-block">
-          v1.0.0
+          v1.1.0
         </span>
       </div>
 
