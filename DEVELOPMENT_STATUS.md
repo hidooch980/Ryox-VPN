@@ -16,7 +16,7 @@ Repository: <https://github.com/hidooch980/Ryox-VPN>
 - **Core Architecture**: Modular multi-core engine — `sing-box`, `Xray-core`, `Mihomo`, `WireGuard`, plus `Wintun` for Layer-3 TUN on Windows
 - **Overall Build Status**: **STABLE (GREEN)** — typecheck, tests, renderer build and Electron build all pass locally and in CI
 - **Published artifacts (v1.0.0 release)**: `RYOX.VPN.Setup.1.0.0.exe` (114 MB), `RYOX.VPN-1.0.0-win.zip` (115.3 MB), `RYOX-VPN-v1.0.0.apk` (47.1 MB), `SHA256SUMS.txt`
-- **Test Suite Status**: **102 tests across 10 files — 91 passing, 11 skipped** (skips are real-binary/real-network cases that need `bin/` and connectivity)
+- **Test Suite Status**: **103 tests across 10 files — 92 passing, 11 skipped** (skips are real-binary/real-network cases that need `bin/` and connectivity)
 - **Core Config Validation**: **180 generated configs checked by the real `sing-box 1.14.4` / `Xray 26.11.9` / `Mihomo v1.19.0` binaries — 0 rejected, 15 skipped** (protocol a core genuinely cannot serve) via `npm run validate:cores`
 - **Type Checking**: `npm run typecheck` (renderer + Electron) — clean
 - **Language Support**: فارسی (Persian, RTL) + English
@@ -55,13 +55,13 @@ Output of `npm run test` (Vitest):
  ✓ tests/ipc-contract.test.ts (10 tests)
  ✓ tests/secret-vault.test.ts (7 tests)
  ✓ tests/vpn-connection.test.ts (6 tests | 1 skipped)
- ✓ tests/features.test.ts (5 tests)
+ ✓ tests/features.test.ts (6 tests)
  ✓ tests/security-hardening.test.ts (5 tests)
  ✓ tests/updater-verification.test.ts (2 tests)
 
  Test Files  10 passed (10)
-      Tests  91 passed | 11 skipped (102)
-   Duration  5.03s
+      Tests  92 passed | 11 skipped (103)
+   Duration  3.96s
 ```
 
 Real-core config validation (`npm run validate:cores`), which compiles `dist-electron/`
@@ -94,7 +94,7 @@ All generated configs were accepted by the real core binaries.
 5. **IPC Contract** — bidirectional `invoke`/`handle` and `send`/`on` parity between `src/main` and `src/preload`, so a renamed channel cannot silently ship.
 6. **Advanced features** — WARP profile generation (Curve25519 + clean IP) and real download speed measurement (or an honest failure).
 
-> Note: `tests/features.test.ts` and the real-core adapter test perform real I/O (WARP, speed test, `sing-box.exe`), so the suite needs connectivity and a populated `bin/` for full coverage; missing binaries are skipped.
+> Note: `tests/core-adapters.test.ts` (real `sing-box.exe`), `CleanIpScanner` and `RealSpeedTester` in `tests/features.test.ts` perform real I/O, so those cases need connectivity and a populated `bin/`; missing binaries or reachability are skipped. WARP profile generation is not in that group — `WarpService.generateWarpProfile` accepts an injected `fetch`, so its tests are offline and deterministic.
 
 ---
 
@@ -261,8 +261,10 @@ Packaging prerequisites that are now committed and verified:
 ## 5. Known Constraints
 
 - A core executable must exist in `bin/` or `%APPDATA%\.ryox-vpn\bin`. Without one, connecting now **fails with an explicit error** naming the missing binary and the install command — the app no longer reports `CONNECTED` with no tunnel. Run `npm run setup:cores` once.
-- Android release builds are signed with the debug keystore (open-source default) — replace with a private keystore before a Play Store submission.
-- Android TUN currently captures traffic through the mixed inbound + `setHttpProxy` path (`CAPTURE_ALL_TRAFFIC_IN_TUN = false`). A default `addRoute("0.0.0.0", 0)` needs a core build that accepts a passed-in TUN file descriptor, which the bundled `libsingbox.so` does not expose.
+- Android release builds are signed with the debug keystore unless a private key is supplied. That fallback is deliberate, not an oversight: `android/app/build.gradle.kts` registers a `release` signing config only when the untracked `android/keystore.properties` exists, and otherwise keeps `signingConfigs.getByName("debug")` so a fresh clone still assembles a release APK without any secret. The template `android/keystore.properties.example` lists the four required keys — `storeFile`, `storePassword`, `keyAlias`, `keyPassword` — where `storeFile` is resolved relative to `android/app/`; a file that exists but leaves a key blank fails configuration with the missing key names instead of silently producing a debug-signed artifact. Generate the key outside the repository once, then copy the template next to the Gradle root and fill it in:
+  `keytool -genkeypair -v -keystore release.jks -alias ryox -keyalg RSA -keysize 4096 -validity 10000`
+  Both `android/keystore.properties` and `*.jks` are git-ignored, so no keystore or password can be committed by accident. This makes local and open-source builds work out of the box; it does not make a Play Store submission possible — that still needs the private key above.
+- Android TUN currently captures traffic through the mixed inbound + `setHttpProxy` path (`CAPTURE_ALL_TRAFFIC_IN_TUN = false`, `android/app/src/main/java/com/ryox/vpn/service/RyoxVpnService.kt:65`), so only apps that honour the system proxy are tunnelled. The guarded `builder.addRoute("0.0.0.0", 0)` at `RyoxVpnService.kt:604` stays disabled because the core runs as a plain child process (`RyoxVpnService.kt:55-58`) and the bundled `libsingbox.so` (sing-box 1.10.7) exposes no fd hand-off entry point: nothing in the app ever reads `vpnInterface`, so the descriptor `establish()` returns has no reader. Enabling the default route in that state would black-hole every packet that bypasses the local proxy, VPN DNS servers included — a device-wide outage rather than a tunnel. The realistic path is a libbox-style library that exposes `VpnService`'s fd to a userspace stack — gomobile-generated and loaded in-process so the core can service the descriptor it is handed — after which the flag and the route can be turned on together. Until then the proxy path remains the working transport.
 - The Android kill switch is a documented no-op and reports `UNAVAILABLE` (`VpnService` has no firewall API); only the desktop build has a real kill switch.
 - The credential vault's key lives in `%APPDATA%\.ryox-vpn\storage.key` next to the sealed stores, so it protects against casual inspection, backup/cloud sync of the JSON, and log paste leaks — not against an attacker who can already read the user profile. Losing the key makes the sealed stores unreadable; the app then reports the condition and leaves the files untouched instead of deleting them.
 - Auto-switch only considers nodes whose latency was measured by an explicit ping test in the same session; an untested node is never assumed to be faster. With no measured alternatives the feature stays idle rather than guessing.

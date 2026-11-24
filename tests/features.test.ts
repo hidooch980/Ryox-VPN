@@ -8,7 +8,17 @@ import { VpnServerConfig, AppSettings } from '../src/shared/types';
 
 describe('New Advanced Features Test Suite', () => {
   it('WarpService generates valid Curve25519 WireGuard profile with Clean IP', async () => {
-    const warp = await WarpService.generateWarpProfile('188.114.96.1');
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const stubFetch = (async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        json: async () => ({ result: { config: { interface: { addresses: { v4: '172.16.0.42' } } } } })
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    const warp = await WarpService.generateWarpProfile('188.114.96.1', stubFetch);
+
     expect(warp).toBeDefined();
     expect(warp.protocol).toBe('wireguard');
     expect(warp.core).toBe('sing-box');
@@ -16,9 +26,23 @@ describe('New Advanced Features Test Suite', () => {
     expect(warp.privateKey).toBeDefined();
     expect(warp.privateKey?.length).toBeGreaterThan(20);
     expect(warp.peerPublicKey).toBe('bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wMbgyo=');
+    // The IPv4 the registration stub returned is what lands in the profile.
+    expect(warp.address).toContain('172.16.0.42/32');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('https://api.cloudflareclient.com/v0a2158/reg');
+    expect(calls[0].init?.method).toBe('POST');
+  });
+
+  it('WarpService falls back to the standard WARP pool address when registration throws', async () => {
+    const failingFetch = (async () => {
+      throw new Error('registration unavailable');
+    }) as unknown as typeof fetch;
+
+    const warp = await WarpService.generateWarpProfile('188.114.96.1', failingFetch);
+
     expect(warp.address).toContain('172.16.0.2/32');
-    // Live registration call (AbortSignal 8s) outlives vitest's 5s default.
-  }, 20000);
+    expect(warp.peerPublicKey).toBe('bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wMbgyo=');
+  });
 
   it('CleanIpScanner returns sorted IP latency list', async () => {
     const results = await CleanIpScanner.scan(443, 200); // short timeout for testing

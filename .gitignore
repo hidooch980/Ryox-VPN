@@ -15,6 +15,10 @@ build/*
 android/build/
 android/app/build/
 android/.gradle/
+# Release signing is local only: the properties file carries the keystore
+# passwords and the keystore itself is machine-specific. Never commit either.
+android/keystore.properties
+*.jks
 # Vendored Android core build inputs. The native library that actually ships is
 # android/app/src/main/jniLibs/arm64-v8a/libsingbox.so; the upstream release
 # archive and its extracted copy are duplicate bytes and stay out of git

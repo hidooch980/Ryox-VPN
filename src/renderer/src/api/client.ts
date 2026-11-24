@@ -297,8 +297,13 @@ export const api = {
             totalDownload: mockStats.totalDownload + dl,
             sessionDuration: Math.floor((Date.now() - start) / 1000),
             pingMs: Math.floor(Math.random() * 20) + 35,
-            clientIp: '185.199.108.153',
-            clientCountry: server.countryName || 'United States'
+            // Demo mode only: the WARP tunnel address pool, never a real public IP.
+            clientIp: '172.16.0.2',
+            clientCountry: server.countryName || 'United States',
+            // Simulated so the demo exercises the same three dashboard rows.
+            healthScore: 78 + Math.floor(Math.random() * 18),
+            telemetrySource: 'process-counters' as const,
+            autoSwitchCount: 0
           };
           listeners.stats.forEach(cb => cb({ ...mockStats }));
         }, 1000);

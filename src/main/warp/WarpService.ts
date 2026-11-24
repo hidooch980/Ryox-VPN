@@ -5,7 +5,10 @@ export class WarpService {
   /**
    * Generates a free Cloudflare WARP WireGuard profile
    */
-  public static async generateWarpProfile(cleanIp: string = '162.159.192.1'): Promise<VpnServerConfig> {
+  public static async generateWarpProfile(
+    cleanIp: string = '162.159.192.1',
+    fetchImpl: typeof fetch = globalThis.fetch
+  ): Promise<VpnServerConfig> {
     // 1. Generate Wireguard Curve25519 keypair
     const { privateKey, publicKey } = generateKeyPairSync('x25519');
     
@@ -18,7 +21,7 @@ export class WarpService {
 
     try {
       // 2. Register account with Cloudflare Client API
-      const res = await fetch('https://api.cloudflareclient.com/v0a2158/reg', {
+      const res = await fetchImpl('https://api.cloudflareclient.com/v0a2158/reg', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

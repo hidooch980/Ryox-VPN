@@ -9,7 +9,8 @@ import {
   ChevronRight, 
   Zap,
   Shield,
-  Layers
+  Layers,
+  Activity
 } from 'lucide-react';
 import { CircularConnectButton } from '../components/CircularConnectButton';
 import { SpeedChart } from '../components/SpeedChart';
@@ -36,6 +37,25 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   onNavigate
 }) => {
   const isConnected = stats.connectionState === 'CONNECTED';
+
+  const healthScore =
+    typeof stats.healthScore === 'number' && Number.isFinite(stats.healthScore)
+      ? stats.healthScore
+      : undefined;
+  const healthTone =
+    healthScore === undefined
+      ? 'text-slate-500'
+      : healthScore >= 70
+        ? 'text-emerald-400'
+        : healthScore >= 40
+          ? 'text-amber-400'
+          : 'text-red-400';
+  const telemetryLabel =
+    stats.telemetrySource === 'clash-api'
+      ? 'Core API'
+      : stats.telemetrySource === 'process-counters'
+        ? 'Process counters'
+        : '—';
 
   // Format helpers
   const formatSpeed = (bytesPerSec: number) => {
@@ -152,7 +172,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 Virtual IP:
               </span>
               <span className="font-mono text-slate-300">
-                {isConnected ? (stats.clientIp || '185.199.108.153') : 'Direct (Unprotected)'}
+                {isConnected ? (stats.clientIp || '—') : 'Direct (Unprotected)'}
               </span>
             </div>
             <div className="flex items-center justify-between text-slate-400">
@@ -162,6 +182,33 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               </span>
               <span className="font-mono text-cyan-400">
                 {isConnected ? `${stats.pingMs} ms` : '—'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-slate-400">
+              <span className="flex items-center gap-1.5">
+                <Activity className="w-3.5 h-3.5 text-slate-500" />
+                Node Health:
+              </span>
+              <span className={`font-mono ${healthTone}`}>
+                {isConnected && healthScore !== undefined ? `${Math.round(healthScore)}/100` : '—'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-slate-400">
+              <span className="flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-slate-500" />
+                Telemetry Source:
+              </span>
+              <span className="font-mono text-slate-300">
+                {isConnected ? telemetryLabel : '—'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-slate-400">
+              <span className="flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5 text-slate-500" />
+                Auto Switches:
+              </span>
+              <span className={`font-mono ${isConnected && stats.autoSwitchCount && stats.autoSwitchCount > 0 ? 'text-amber-400' : 'text-slate-500'}`}>
+                {isConnected ? (stats.autoSwitchCount && stats.autoSwitchCount > 0 ? stats.autoSwitchCount : '0') : '—'}
               </span>
             </div>
           </div>
