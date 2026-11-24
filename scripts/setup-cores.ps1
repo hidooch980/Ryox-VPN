@@ -48,6 +48,7 @@ $cores = @(
     },
     @{
         Name = "Mihomo"
+        ArchiveExe = "mihomo-windows-amd64.exe"
         Exe  = "mihomo.exe"
         Url  = "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.0/mihomo-windows-amd64-v1.19.0.zip"
     }
@@ -70,7 +71,8 @@ foreach ($core in $cores) {
     Remove-Item -Recurse -Force -Path $extractDir -ErrorAction SilentlyContinue
     Expand-Archive -Path $zip -DestinationPath $extractDir -Force
 
-    $exe = Get-ChildItem -Path $extractDir -Recurse -Filter $core.Exe | Select-Object -First 1
+    $archiveExe = if ($core.ArchiveExe) { $core.ArchiveExe } else { $core.Exe }
+    $exe = Get-ChildItem -Path $extractDir -Recurse -File -Filter $archiveExe | Select-Object -First 1
     if (-not $exe) {
         throw "$($core.Exe) was not found inside $($core.Url)"
     }
