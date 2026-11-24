@@ -26,6 +26,7 @@ android/keystore.properties
 singbox-arm64.tar.gz
 sing-box-1.10.7-android-arm64/sing-box
 # Local-only tooling state
+.agents/
 .dsh-meow/
 .sharrowkin/
 temp_zip/
