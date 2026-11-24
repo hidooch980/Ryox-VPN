@@ -1,10 +1,12 @@
 import React from 'react';
-import { Activity, Power, Server } from 'lucide-react';
-import { SpeedChart } from '../components/SpeedChart';
+import { Activity, Power, Globe2, SlidersHorizontal, RefreshCw, Stethoscope } from 'lucide-react';
+import { regionOf } from '../api/useCatalogue';
 import { VpnServerConfig, LiveStats, AppSettings } from '../../../shared/types';
 import { PageId } from '../components/Sidebar';
 
 interface DashboardPageProps {
+  region: string; mode: string; setRegion: (region: string) => void; setMode: (mode: string) => void;
+  refresh: () => void; phase: string; updateUrl: string;
   stats: LiveStats;
   servers: VpnServerConfig[];
   selectedServer?: VpnServerConfig;
@@ -20,7 +22,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   selectedServer,
   settings,
   onConnectToggle,
-  onSelectServer,
+  region, mode, setRegion, setMode, refresh, phase, updateUrl,
   onNavigate
 }) => {
   const isConnected = stats.connectionState === 'CONNECTED';
@@ -41,65 +43,49 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
   };
 
-  const formatBytes = (bytes: number) => {
-    if (bytes > 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-    if (bytes > 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / 1024).toFixed(0)} KB`;
-  };
-
-  const formatDuration = (seconds: number) => {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    return `${hrs > 0 ? `${hrs}:` : ''}${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
+  const sec = Math.max(0, Math.floor(stats.sessionDuration || 0));
+  const duration = [Math.floor(sec / 3600), Math.floor(sec / 60) % 60, sec % 60].map(n => String(n).padStart(2,'0')).join(':');
   const node = isConnected ? stats.activeServer ?? selectedServer : selectedServer;
-  const android = Boolean(window.AndroidBridge);
+  
   const title = isConnected ? (fa ? 'متصل' : 'Connected') : connecting ? (fa ? 'در حال بررسی اتصال' : 'Checking connection')
     : stats.connectionState === 'ERROR' ? (fa ? 'اتصال ناموفق' : 'Connection failed')
     : stats.connectionState === 'DISCONNECTING' ? (fa ? 'در حال قطع اتصال' : 'Disconnecting') : (fa ? 'قطع اتصال' : 'Disconnected');
-  const metrics = [
-    [fa ? 'دریافت' : 'Download', formatSpeed(stats.downloadSpeed)],
-    [fa ? 'ارسال' : 'Upload', formatSpeed(stats.uploadSpeed)],
-    [fa ? 'حجم مصرفی' : 'Transferred', formatBytes(stats.totalUpload + stats.totalDownload)],
-    [fa ? 'مدت اتصال' : 'Duration', formatDuration(stats.sessionDuration)]
-  ];
-  const details = [
-    [fa ? 'هسته' : 'Engine', android ? 'sing-box' : stats.activeCore],
-    [fa ? 'مسیر اتصال' : 'Mode', android ? (fa ? 'پروکسی سیستم' : 'System proxy') : settings.tunnelMode],
-    [fa ? 'تأخیر' : 'Latency', isConnected && stats.pingMs > 0 ? `${stats.pingMs} ms` : '—'],
-    [fa ? 'نشانی خروجی' : 'Exit IP', isConnected ? stats.clientIp || '—' : '—'],
-    [fa ? 'سلامت سرور' : 'Node health', isConnected && stats.healthScore != null ? `${stats.healthScore}/100` : '—'],
-    [fa ? 'تعویض خودکار' : 'Auto switches', String(stats.autoSwitchCount ?? 0)],
-    ...(!android ? [[fa ? 'محافظ قطع اتصال' : 'Kill switch', stats.killSwitchArmed ? (fa ? 'فعال' : 'Armed') : (fa ? 'غیرفعال' : 'Off')]] : [])
-  ];
-
-  return (
-    <div className="session-view">
-      <section className="session-cover">
-        <div>
-          <h1>{fa ? 'اتصال شبکه' : 'Network connection'}</h1>
-          <h2 aria-live="polite">{title}</h2>
-          <button className="session-action" disabled={stats.connectionState === 'DISCONNECTING'}
-            onClick={chooseServer ? () => onNavigate('servers') : onConnectToggle}>
-            <Power size={18} />{actionLabel}
-          </button>
+  const regions = [...new Set(servers.map(regionOf))].sort();
+  const protocols = [...new Set(servers.map(s => s.protocol))].sort();
+  const names = new Intl.DisplayNames([fa ? 'fa' : 'en'], {type:'region'});
+  const label = (code: string) => code === '?' ? (fa ? 'نامشخص' : 'Unknown') : /^[A-Z]{2}$/.test(code) ? names.of(code) || code : code;
+  const locked = isConnected || connecting || stats.connectionState === 'DISCONNECTING';
+  const activeRegion = node && regionOf(node);
+  return <div className="vpn-home">
+    <section className="vpn-connection">
+      <div className="vpn-overview">
+        <div><span className="vpn-state" aria-live="polite">{title}</span>
+          <strong className="vpn-time" dir="ltr">{duration}</strong>
+          <small>{activeRegion ? label(activeRegion) : (fa ? 'مکان خودکار' : 'Automatic location')} · {node?.protocol.toUpperCase() ?? '—'}</small>
         </div>
-        <div className="session-signal" aria-hidden="true"><Activity /></div>
-      </section>
-      {stats.connectionState === 'ERROR' && <button className="session-error" onClick={() => onNavigate('logs')}>
-        {fa ? 'مشاهدهٔ گزارش خطای اتصال' : 'View connection error log'} {stats.killSwitchArmed && (fa ? ' · محافظ فعال است' : ' · Kill switch armed')}
-      </button>}
-      <button className="session-node" onClick={() => onNavigate('servers')}>
-        <Server /><span><small>{fa ? 'سرور' : 'Server'}</small><strong>{node?.name || (fa ? 'انتخاب سرور' : 'Choose a server')}</strong></span>
-        <bdi>{node?.protocol.toUpperCase() ?? servers.length}</bdi>
-      </button>
-      <div className="session-metrics">{metrics.map(([key,value]) => <div key={key}><small>{key}</small><strong dir="ltr">{value}</strong></div>)}</div>
-      <div className="session-panels">
-        <section><h3>{fa ? 'ترافیک شبکه' : 'Network traffic'}</h3><SpeedChart uploadSpeed={stats.uploadSpeed} downloadSpeed={stats.downloadSpeed} /></section>
-        <section><h3>{fa ? 'جزئیات اتصال' : 'Connection details'}</h3><dl>{details.map(([key,value]) => <div key={key}><dt>{key}</dt><dd><bdi>{value}</bdi></dd></div>)}</dl></section>
+        <button className="vpn-power" aria-label={actionLabel} title={actionLabel} disabled={stats.connectionState === 'DISCONNECTING'}
+          onClick={chooseServer ? () => onNavigate('servers') : onConnectToggle}><Power size={44}/></button>
       </div>
+      <div className="vpn-bandwidth" dir="ltr"><span>↑ {formatSpeed(stats.uploadSpeed)}</span><span>{stats.pingMs > 0 ? stats.pingMs : '—'} ms</span><span>↓ {formatSpeed(stats.downloadSpeed)}</span></div>
+    </section>
+    <p className="vpn-hint">{stats.connectionState === 'ERROR' ? <button onClick={() => onNavigate('logs')}>{fa ? 'اتصال ناموفق؛ مشاهدهٔ گزارش' : 'Connection failed · View log'}</button> : actionLabel}</p>
+    <section className="vpn-ip"><Globe2/><div><small>{fa ? 'آی‌پی خروجی' : 'Exit IP'}</small><strong dir="ltr">{stats.clientIp || '—'}</strong></div><Activity/></section>
+    <div className="vpn-pickers">
+      <label><Globe2/><span>{fa ? 'مکان خروجی' : 'Exit location'}<select value={region} onChange={e => setRegion(e.target.value)} disabled={locked}>
+        <option value="">{fa ? 'خودکار' : 'Automatic'}</option>{[...new Set([...regions,...(region ? [region] : [])])].map(r => <option key={r} value={r}>{label(r)}</option>)}</select></span></label>
+      <label><SlidersHorizontal/><span>{fa ? 'حالت اتصال' : 'Connection mode'}<select value={mode} onChange={e => setMode(e.target.value)} disabled={locked}>
+        <option value="auto">{fa ? 'خودکار' : 'Automatic'}</option><option value="manual">{fa ? 'سرور انتخابی' : 'Selected server'}</option>
+        {[...new Set([...protocols,...(!['auto','manual'].includes(mode) ? [mode] : [])])].map(v => <option key={v} value={v}>{v.toUpperCase()}</option>)}</select></span></label>
+      <button onClick={() => onNavigate('diagnostics')}><Stethoscope/>{fa ? 'عیب‌یابی اتصال' : 'Diagnostics'}</button>
+      <button onClick={refresh} disabled={phase === 'scan' || phase === 'refresh'}><RefreshCw size={16}/>{phase === 'scan' ? (fa ? 'اسکن سرورها…' : 'Scanning…') : phase === 'refresh' ? (fa ? 'دریافت سرورها…' : 'Refreshing…') : (fa ? 'تازه‌سازی سرورها' : 'Refresh servers')}</button>
     </div>
-  );
+    {phase === 'error' && <small role="status">{fa ? 'تازه‌سازی انجام نشد' : 'Refresh failed'}</small>}
+    {stats.killSwitchArmed && <small>{fa ? 'محافظ قطع اتصال فعال است' : 'Kill switch armed'}</small>}
+    {updateUrl && <a className="vpn-update" href={updateUrl} onClick={async event => {
+      if (window.ryoxApi?.installStagedUpdate) {
+        event.preventDefault();
+        if (!await window.ryoxApi.installStagedUpdate()) onNavigate('app-updates');
+      }
+    }}>{fa ? 'نسخهٔ جدید برنامه' : 'Application update available'}</a>}
+  </div>;
 };

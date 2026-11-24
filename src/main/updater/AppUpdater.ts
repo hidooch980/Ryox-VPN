@@ -10,7 +10,7 @@ export interface AppReleaseInfo {
 }
 
 export class AppUpdater {
-  private static currentVersion = '1.1.0';
+  private static currentVersion = '1.2.0';
 
   public static getCurrentVersion(): string {
     return this.currentVersion;
@@ -20,7 +20,7 @@ export class AppUpdater {
     try {
       const res = await fetch('https://api.github.com/repos/hidooch980/Ryox-VPN/releases/latest', {
         headers: {
-          'User-Agent': 'RYOX-VPN-Updater/1.1.0',
+          'User-Agent': 'RYOX-VPN-Updater/1.2.0',
           'Accept': 'application/vnd.github.v3+json'
         },
         signal: AbortSignal.timeout(8000)
@@ -31,7 +31,7 @@ export class AppUpdater {
         return {
           version: this.currentVersion,
           releaseDate: new Date().toISOString(),
-          changelog: 'You are running the latest stable release of RYOX VPN v1.1.0.',
+          changelog: 'You are running the latest stable release of RYOX VPN v1.2.0.',
           hasUpdate: false
         };
       }
@@ -41,14 +41,15 @@ export class AppUpdater {
       const hasUpdate = this.compareVersions(latestTag, this.currentVersion) > 0;
 
       // Find Windows or Android asset
-      const asset = data.assets?.find((a: any) => a.name.includes('.exe') || a.name.includes('.apk') || a.name.includes('.zip'));
+      const asset = data.assets?.find((a: any) => /setup.*\.exe$|\.setup\.[\d.]+exe$/i.test(a.name));
 
       return {
         version: latestTag,
         releaseDate: data.published_at || new Date().toISOString(),
         changelog: data.body || 'Performance improvements and security updates.',
         downloadUrl: asset?.browser_download_url,
-        hasUpdate
+        hasUpdate: hasUpdate && Boolean(asset),
+        sha256: asset?.digest?.replace(/^sha256:/, '')
       };
 
     } catch {

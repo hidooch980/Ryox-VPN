@@ -26,7 +26,7 @@ export const AppUpdatesPage: React.FC = () => {
             Automatic Application Updates via GitHub Releases
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Every update is verified with SHA256 checksums before installation. 100% free forever.
+            Updates are checked automatically while the app is open.
           </p>
         </div>
 
@@ -44,7 +44,7 @@ export const AppUpdatesPage: React.FC = () => {
         <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
           <div>
             <span className="text-xs text-slate-400 block">CURRENT INSTALLED VERSION</span>
-            <span className="text-lg font-bold font-mono text-cyan-400">v1.1.0 (Official Stable Release)</span>
+            <span className="text-lg font-bold font-mono text-cyan-400">v{window.AndroidBridge?.installedVersion?.() ?? '1.2.0'}</span>
           </div>
 
           <div className="text-right">
@@ -78,7 +78,7 @@ export const AppUpdatesPage: React.FC = () => {
                 className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)]"
               >
                 <DownloadCloud className="w-4 h-4" />
-                <span>Download Verified Release Package</span>
+                <span>Download update</span>
               </a>
             )}
           </div>

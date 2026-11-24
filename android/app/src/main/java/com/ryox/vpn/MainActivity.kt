@@ -103,7 +103,7 @@ class MainActivity : AppCompatActivity() {
                 request: WebResourceRequest?
             ): Boolean {
                 val url = request?.url?.toString() ?: return false
-                if (url.startsWith("https://appassets.androidplatform.net")) {
+                if (request?.url?.scheme == "https" && request.url.host == "appassets.androidplatform.net") {
                     return false
                 }
                 // Open external links in device browser
@@ -129,7 +129,10 @@ class MainActivity : AppCompatActivity() {
         stopStatsPusher()
     }
 
+    fun completeCatalogueTask(js: String) { if (!isDestroyed) webView.evaluateJavascript(js, null) }
+
     override fun onDestroy() {
+        androidBridge.close()
         stopStatsPusher()
         super.onDestroy()
     }

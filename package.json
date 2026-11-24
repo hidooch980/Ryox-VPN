@@ -1,6 +1,6 @@
 {
   "name": "ryox-vpn",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "RYOX VPN — Ultimate Free, Open Source Multi-Core VPN Client for Windows and Android",
   "main": "dist-electron/main/index.js",
   "author": "RYOX Network Team <dev@ryoxvpn.org>",

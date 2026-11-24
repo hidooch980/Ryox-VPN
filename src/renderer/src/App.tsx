@@ -1,3 +1,4 @@
+import { regionOf, useCatalogue } from './api/useCatalogue';
 import React, { useState, useEffect } from 'react';
 import { TitleBar } from './components/TitleBar';
 import { Sidebar, PageId } from './components/Sidebar';
@@ -75,6 +76,36 @@ export const App: React.FC = () => {
     sessionDuration: 0,
     pingMs: 0
   });
+
+  const catalogue = useCatalogue(setServers);
+  const [region, setRegion] = useState(() => localStorage.getItem('ryox.region') || '');
+  const [mode, setMode] = useState(() => localStorage.getItem('ryox.routeMode') || 'auto');
+  const [updateUrl, setUpdateUrl] = useState('');
+  useEffect(() => {
+    localStorage.setItem('ryox.region', region);
+    localStorage.setItem('ryox.routeMode', mode);
+  }, [region, mode]);
+  useEffect(() => {
+    let stopped = false;
+    const check = async () => {
+      try {
+        const release = await api.checkForAppUpdates();
+        if (!stopped && release.hasUpdate && release.downloadUrl) {
+          setUpdateUrl(release.downloadUrl);
+          window.AndroidBridge?.downloadUpdate(release.downloadUrl);
+        }
+      } catch { /* Retry on the next scheduled check. */ }
+    };
+    void check();
+    const timer = setInterval(check, 6 * 3600000);
+    return () => { stopped = true; clearInterval(timer); };
+  }, []);
+  const candidates = servers.filter(s => (!region || regionOf(s) === region) &&
+    (mode === 'auto' || mode === 'manual' || s.protocol === mode));
+  const ranked = [...candidates].sort((a,b) =>
+    (a.latency != null && a.latency >= 0 ? a.latency : Infinity) -
+    (b.latency != null && b.latency >= 0 ? b.latency : Infinity));
+  const target = mode === 'manual' ? candidates.find(s => s.id === selectedServer?.id) : ranked[0];
 
   // Initial load
   useEffect(() => {
@@ -170,8 +201,10 @@ export const App: React.FC = () => {
   const handleConnectToggle = async () => {
     if ((stats.connectionState === 'ERROR' && stats.killSwitchArmed) || stats.connectionState === 'CONNECTED' || stats.connectionState === 'CONNECTING' || stats.connectionState === 'VERIFYING') {
       await api.disconnect();
-    } else if (selectedServer) {
-      await api.connect(selectedServer);
+    } else if (target) {
+      await api.connect(target);
+    } else {
+      setActivePage('servers');
     }
   };
 
@@ -222,10 +255,12 @@ export const App: React.FC = () => {
             <DashboardPage
               stats={stats}
               servers={servers}
-              selectedServer={selectedServer}
+              selectedServer={target}
+              region={region} mode={mode} setRegion={setRegion} setMode={setMode}
+              refresh={catalogue.refresh} phase={catalogue.phase} updateUrl={updateUrl}
               settings={settings}
               onConnectToggle={handleConnectToggle}
-              onSelectServer={handleSelectServer}
+              onSelectServer={server => {setMode('manual'); setRegion(''); void handleSelectServer(server);}}
               onNavigate={setActivePage}
             />
           )}
@@ -234,7 +269,7 @@ export const App: React.FC = () => {
             <ServersPage
               servers={servers}
               selectedServer={selectedServer}
-              onSelectServer={handleSelectServer}
+              onSelectServer={server => {setMode('manual'); setRegion(''); void handleSelectServer(server);}}
               onRefreshServers={loadAllData}
             />
           )}
@@ -258,7 +293,7 @@ export const App: React.FC = () => {
             <WorldMapPage
               servers={servers}
               selectedServer={selectedServer}
-              onSelectServer={handleSelectServer}
+              onSelectServer={server => {setMode('manual'); setRegion(''); void handleSelectServer(server);}}
             />
           )}
 

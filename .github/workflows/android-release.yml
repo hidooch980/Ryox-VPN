@@ -8,7 +8,7 @@ on:
         required: true
       release_tag:
         description: Draft release containing the signed APK for install-test
-        default: android-v1.1.1
+        required: true
 
 permissions:
   contents: read
@@ -38,7 +38,9 @@ jobs:
           tools="$ANDROID_HOME/build-tools/35.0.0"
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'build-tools;35.0.0' >/dev/null
           "$tools/aapt" dump badging "$apk" > "$RUNNER_TEMP/badging"
-          grep -F "package: name='com.ryox.vpn' versionCode='3' versionName='1.1.1'" "$RUNNER_TEMP/badging"
+          version=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' android/app/build.gradle.kts)
+          code=$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' android/app/build.gradle.kts)
+          grep -F "package: name='com.ryox.vpn' versionCode='$code' versionName='$version'" "$RUNNER_TEMP/badging"
           grep -F "application-label:'RYOX VPN'" "$RUNNER_TEMP/badging"
           if grep -Fq application-debuggable "$RUNNER_TEMP/badging"; then exit 1; fi
           for abi in arm64-v8a armeabi-v7a x86_64 x86; do unzip -Z1 "$apk" | grep -Fx "lib/$abi/libsingbox.so"; done
@@ -59,11 +61,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.release_tag }}
-        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p 'RYOX-VPN-1.1.1.apk'
+        run: |
+          [[ "$TAG" =~ ^android-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p "RYOX-VPN-${TAG#android-v}.apk" -O candidate.apk
       - uses: actions/upload-artifact@v4
         with:
           name: signed-install-candidate
-          path: RYOX-VPN-1.1.1.apk
+          path: candidate.apk
   install:
     needs: candidate
     runs-on: ubuntu-latest
@@ -81,8 +85,8 @@ jobs:
           api-level: 35
           arch: x86_64
           script: |
-            adb install RYOX-VPN-1.1.1.apk
+            adb install candidate.apk
             adb shell am start -W -n com.ryox.vpn/.MainActivity
             sleep 5
             adb shell pidof com.ryox.vpn
-            adb install -r RYOX-VPN-1.1.1.apk
+            adb install -r candidate.apk

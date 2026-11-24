@@ -127,7 +127,7 @@ export class ProtocolParser {
     const b64 = uri.replace(/^vmess:\/\//, '');
     let decodedJson: string;
     try {
-      decodedJson = Buffer.from(b64, 'base64').toString('utf-8');
+      decodedJson = ProtocolParser.tryDecodeBase64(b64) || '';
     } catch {
       return null;
     }
@@ -475,10 +475,9 @@ export class ProtocolParser {
     const normalized = ProtocolParser.normalizeBase64(value);
     if (!normalized || !/^[A-Za-z0-9+/]+={0,2}$/.test(normalized)) return null;
     try {
-      const decoded = Buffer.from(normalized, 'base64').toString('utf-8');
-      if (!decoded) return null;
-      const reencoded = Buffer.from(decoded, 'utf-8').toString('base64').replace(/=+$/, '');
-      if (reencoded !== normalized.replace(/=+$/, '')) return null;
+      const binary = atob(normalized);
+      if (btoa(binary).replace(/=+$/, '') !== normalized.replace(/=+$/, '')) return null;
+      const decoded = new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(binary, c => c.charCodeAt(0)));
       return decoded;
     } catch {
       return null;

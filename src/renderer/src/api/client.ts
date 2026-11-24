@@ -1,3 +1,4 @@
+import { ProtocolParser } from '../../../main/protocol/parser';
 import { 
   VpnServerConfig, 
   AppSettings, 
@@ -22,6 +23,37 @@ declare global {
 // Android WebView Native Bridge Adapter
 if (typeof window !== 'undefined' && (window as any).AndroidBridge && !window.ryoxApi) {
   const bridge = (window as any).AndroidBridge;
+  const pending = new Map<string, (value: string | null) => void>();
+  (window as any).ryoxTaskDone = (id: string, value: string | null) => pending.get(id)?.(value);
+  function task(operation: string, value: string, port = 0): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const id = crypto.randomUUID();
+      const timer = setTimeout(() => pending.get(id)?.(null), 30000);
+      pending.set(id, result => {
+        clearTimeout(timer);
+        pending.delete(id);
+        if (result == null) reject(new Error('Network request failed'));
+        else resolve(result);
+      });
+      bridge.catalogueTask(id, operation, value, port);
+    });
+  }
+  async function refreshFeed(id: string, url: string) {
+    const body = await task('feed', url);
+    const parsed = ProtocolParser.parseSubscription(body, id);
+    if (!parsed.length) throw new Error('No usable servers in feed');
+    const previous: VpnServerConfig[] = JSON.parse(bridge.getServers());
+    const key = (s: VpnServerConfig) => s.rawUri || JSON.stringify([s.protocol,s.server,s.port,s.uuid,s.password,s.path]);
+    const known = new Map(previous.filter(s => s.subscriptionId === id).map(s => [key(s), s]));
+    const unique = new Map<string,VpnServerConfig>();
+    for (const node of parsed) {
+      const old = known.get(key(node));
+      unique.set(key(node), {...node, id: old?.id ?? crypto.randomUUID(), isFavorite: old?.isFavorite, subscriptionId: id});
+    }
+    const rows = [...unique.values()];
+    bridge.replaceSource(id, JSON.stringify(rows));
+    return rows;
+  }
   window.ryoxApi = {
     connect: async (server: any) => {
       return bridge.connect(JSON.stringify(server));
@@ -45,7 +77,7 @@ if (typeof window !== 'undefined' && (window as any).AndroidBridge && !window.ry
       try { return JSON.parse(bridge.removeServer(id)); } catch { return []; }
     },
     pingServer: async (server: any) => {
-      try { return bridge.pingServer(server.server, server.port); } catch { return -1; }
+      try { return Number(await task('ping', server.server, server.port)); } catch { return -1; }
     },
     parseUri: async (_uri: string) => {
       return null;
@@ -57,7 +89,8 @@ if (typeof window !== 'undefined' && (window as any).AndroidBridge && !window.ry
       try { return JSON.parse(bridge.addSubscription(name, url, interval)); } catch { return []; }
     },
     updateSubscription: async (id: string) => {
-      try { return JSON.parse(bridge.updateSubscription(id)); } catch { return []; }
+      const sub = JSON.parse(bridge.getSubscriptions()).find((s: Subscription) => s.id === id);
+      return sub ? refreshFeed(id, sub.url) : [];
     },
     removeSubscription: async (id: string) => {
       try { return bridge.removeSubscription(id); } catch { return false; }
@@ -67,14 +100,15 @@ if (typeof window !== 'undefined' && (window as any).AndroidBridge && !window.ry
       try { return JSON.parse(bridge.getSources()); } catch { return []; }
     },
     fetchAllFreeSources: async () => {
-      try {
-        const res = JSON.parse(bridge.fetchAllSources());
-        const servers = res && Array.isArray(res.servers) ? res.servers : [];
-        const totalRaw = res && typeof res.totalRaw === 'number'
-          ? res.totalRaw
-          : (res && typeof res.successCount === 'number' ? res.successCount : servers.length);
-        return { servers, totalRaw };
-      } catch { return { servers: [], totalRaw: 0 }; }
+      const feeds: Record<string,string> = {
+        'src-gh-1':'https://raw.githubusercontent.com/yebekhe/TVC/main/subscriptions/xray/normal/vless',
+        'src-gh-2':'https://raw.githubusercontent.com/barry-far/V2ray-Configs/main/Sub1.txt',
+        'src-gh-3':'https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/Eternity.txt'
+      };
+      const sources: FreeConfigSource[] = JSON.parse(bridge.getSources());
+      const results = await Promise.allSettled(sources.filter(s => s.enabled).map(s => refreshFeed(s.id, feeds[s.id])));
+      const servers = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
+      return { servers, totalRaw: servers.length };
     },
     toggleFreeSource: async (id: string, enabled: boolean) => {
       try { return Boolean(bridge.toggleSource(id, enabled)); } catch { return false; }
@@ -82,13 +116,19 @@ if (typeof window !== 'undefined' && (window as any).AndroidBridge && !window.ry
     getCores: async () => {
       try { return JSON.parse(bridge.getCoresMetadata()); } catch { return []; }
     },
-    // Android ships as an APK signed by the same key; there is no in-app updater,
-    // so report that honestly instead of throwing.
-    checkForAppUpdates: async () => ({
-      version: '1.1.0',
-      hasUpdate: false,
-      changelog: 'In-app updates are not available on the Android build. Install a newer RYOX VPN APK to update.'
-    }),
+    checkForAppUpdates: async () => {
+      const releases = JSON.parse(await task('feed','https://api.github.com/repos/hidooch980/Ryox-VPN/releases'));
+      const current = bridge.installedVersion();
+      for (const release of releases) {
+        if (release.draft || release.prerelease) continue;
+        const asset = release.assets.find((a: any) => /^RYOX-VPN-([0-9]+\.[0-9]+\.[0-9]+)\.apk$/i.test(a.name));
+        if (!asset) continue;
+        const version = asset.name.slice(9,-4);
+        return {version, changelog: release.body, downloadUrl: asset.browser_download_url,
+          hasUpdate: version.localeCompare(current, 'en', {numeric:true}) > 0};
+      }
+      return {version: current, hasUpdate:false};
+    },
     getSettings: async () => {
       try { return JSON.parse(bridge.getSettings()); } catch { return null; }
     },
@@ -577,9 +617,9 @@ export const api = {
   async checkForAppUpdates() {
     if (window.ryoxApi) return window.ryoxApi.checkForAppUpdates();
     return {
-      version: '1.1.0',
+      version: '1.2.0',
       releaseDate: new Date().toISOString(),
-      changelog: 'You are on the latest official build of RYOX VPN v1.1.0.',
+      changelog: 'You are on the latest official build of RYOX VPN v1.2.0.',
       hasUpdate: false
     };
   },

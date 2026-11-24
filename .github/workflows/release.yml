@@ -6,11 +6,7 @@ on:
       - 'v*'
 
 jobs:
-  android:
-    uses: ./.github/workflows/android-build.yml
-
   create-release:
-    needs: android
     runs-on: windows-latest
     permissions:
       contents: write

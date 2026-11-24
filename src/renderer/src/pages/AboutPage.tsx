@@ -14,7 +14,7 @@ export const AboutPage: React.FC = () => {
               RYOX VPN
             </h1>
             <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-cyan-950 border border-cyan-500/40 text-cyan-300">
-              v1.1.0
+              v1.2.0
             </span>
           </div>
           <p className="text-sm font-semibold text-slate-200">

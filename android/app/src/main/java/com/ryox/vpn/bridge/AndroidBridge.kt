@@ -430,32 +430,90 @@ class AndroidBridge(private val activity: MainActivity) {
         return gson.toJson(best)
     }
 
+    private val background = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
     @JavascriptInterface
-    fun getSubscriptions(): String {
-        val subs = listOf(
-            mapOf(
-                "id" to "sub-official-1",
-                "name" to "RYOX Free Verified Nodes",
-                "url" to "https://raw.githubusercontent.com/yebekhe/TelegramFreeProxy/main/sub/base64",
-                "intervalHours" to 6,
-                "lastUpdated" to System.currentTimeMillis()
-            )
-        )
-        return gson.toJson(subs)
+    fun installedVersion(): String = activity.packageManager.getPackageInfo(activity.packageName, 0).versionName ?: ""
+
+    @JavascriptInterface
+    fun downloadUpdate(url: String): Boolean {
+        val uri = android.net.Uri.parse(url)
+        require(uri.scheme == "https" && uri.host == "github.com" &&
+            uri.path.orEmpty().matches(Regex("""/hidooch980/Ryox-VPN/releases/download/[^/]+/RYOX-VPN-[0-9.]+\.apk""")))
+        val manager = activity.getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+        val previous = prefs.getLong("update_download_id", -1)
+        if (prefs.getString("update_download_url", "") == url && previous >= 0) {
+            manager.query(android.app.DownloadManager.Query().setFilterById(previous)).use { cursor ->
+                if (cursor.moveToFirst() && cursor.getInt(cursor.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS)) != android.app.DownloadManager.STATUS_FAILED) return true
+            }
+        }
+        val request = android.app.DownloadManager.Request(uri).setTitle("RYOX VPN")
+            .setMimeType("application/vnd.android.package-archive")
+            .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, uri.lastPathSegment)
+        val id = manager.enqueue(request)
+        prefs.edit().putLong("update_download_id", id).putString("update_download_url", url).apply()
+        return true
+    }
+
+    fun close() { background.cancel() }
+
+    @JavascriptInterface
+    fun catalogueTask(id: String, operation: String, value: String, port: Int) {
+        background.launch {
+            val result = runCatching {
+                when (operation) {
+                    "ping" -> pingServer(value, port).toString()
+                    "feed" -> {
+                        require(value.startsWith("https://"))
+                        okHttpClient.newCall(Request.Builder().url(value).build()).execute().use { response ->
+                            check(response.isSuccessful)
+                            val source = response.body?.source() ?: error("Empty response")
+                            require(!source.request(4L * 1024 * 1024 + 1)) { "Feed too large" }
+                            source.readUtf8()
+                        }
+                    }
+                    else -> error("Unsupported operation")
+                }
+            }
+            val js = "window.ryoxTaskDone?.(${gson.toJson(id)},${gson.toJson(result.getOrNull())})"
+            activity.runOnUiThread { activity.completeCatalogueTask(js) }
+        }
     }
 
     @JavascriptInterface
+    fun getSubscriptions(): String = prefs.getString("subscriptions_v2", "[]") ?: "[]"
+
+    @JavascriptInterface
+    @Synchronized
     fun addSubscription(name: String, url: String, interval: Int): String {
-        return getSubscriptions()
+        require(url.startsWith("https://"))
+        val rows = com.google.gson.JsonParser.parseString(getSubscriptions()).asJsonArray
+        rows.add(gson.toJsonTree(mapOf("id" to java.util.UUID.randomUUID().toString(), "name" to name,
+            "url" to url, "enabled" to true, "updateIntervalHours" to interval.coerceAtLeast(1), "serverCount" to 0)))
+        prefs.edit().putString("subscriptions_v2", rows.toString()).apply()
+        return rows.toString()
     }
 
     @JavascriptInterface
-    fun updateSubscription(id: String): String {
-        return "[]"
+    @Synchronized
+    fun replaceSource(id: String, json: String) {
+        val rows = com.google.gson.JsonParser.parseString(getServers()).asJsonArray
+        val kept = com.google.gson.JsonArray()
+        rows.filter { it.asJsonObject.get("subscriptionId")?.asString != id }.forEach { kept.add(it) }
+        val fresh = com.google.gson.JsonParser.parseString(json).asJsonArray
+        fresh.forEach { kept.add(it) }
+        prefs.edit().putString("servers_list", kept.toString()).apply()
     }
 
     @JavascriptInterface
+    @Synchronized
     fun removeSubscription(id: String): Boolean {
+        val rows = com.google.gson.JsonParser.parseString(getSubscriptions()).asJsonArray
+        val kept = com.google.gson.JsonArray()
+        rows.filter { it.asJsonObject.get("id").asString != id }.forEach { kept.add(it) }
+        prefs.edit().putString("subscriptions_v2", kept.toString()).apply()
+        replaceSource(id, "[]")
         return true
     }
 
@@ -470,7 +528,7 @@ class AndroidBridge(private val activity: MainActivity) {
                 "url" to "https://github.com/yebekhe/TelegramFreeProxy",
                 "maintainer" to "Yebekhe (Open-Source Community)",
                 "protocols" to listOf("vless", "vmess", "trojan", "shadowsocks"),
-                "enabled" to true,
+                "enabled" to prefs.getBoolean("enabled_" + "src-gh-1", true),
                 "description" to "Auto-updated aggregation of public anti-censorship proxy endpoints",
                 "trustLevel" to "Community"
             ),
@@ -480,7 +538,7 @@ class AndroidBridge(private val activity: MainActivity) {
                 "url" to "https://github.com/barry-far/V2RayAggregator",
                 "maintainer" to "Barry-Far (Open-Source Community)",
                 "protocols" to listOf("vless", "vmess", "trojan"),
-                "enabled" to true,
+                "enabled" to prefs.getBoolean("enabled_src-gh-2", true),
                 "description" to "Continuously refreshed public V2Ray and Reality configurations",
                 "trustLevel" to "Community"
             ),
@@ -490,7 +548,7 @@ class AndroidBridge(private val activity: MainActivity) {
                 "url" to "https://github.com/mahdibland/V2RayAggregator",
                 "maintainer" to "MahdiBland (Open-Source Community)",
                 "protocols" to listOf("vless", "vmess", "shadowsocks"),
-                "enabled" to true,
+                "enabled" to prefs.getBoolean("enabled_src-gh-3", true),
                 "description" to "Large public feed of community verified free nodes",
                 "trustLevel" to "Community"
             )
@@ -507,6 +565,7 @@ class AndroidBridge(private val activity: MainActivity) {
 
     @JavascriptInterface
     fun toggleSource(id: String, enabled: Boolean): Boolean {
+        prefs.edit().putBoolean("enabled_" + id, enabled).apply()
         return true
     }
 

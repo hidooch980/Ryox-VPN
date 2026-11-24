@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, powerMonitor } from 'electron';
+import { shell, app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, powerMonitor } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { StorageManager } from './storage/StorageManager';
@@ -315,7 +315,7 @@ function createTray() {
   tray.setToolTip('RYOX VPN — 100% Free Forever');
 
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'RYOX VPN v1.1.0', enabled: false },
+    { label: 'RYOX VPN v1.2.0', enabled: false },
     { type: 'separator' },
     {
       label: 'Open Dashboard',
@@ -663,8 +663,37 @@ ipcMain.handle('servers:export', async () => {
   const uris = list.map(s => s.rawUri || `${s.protocol}://${s.server}:${s.port}#${encodeURIComponent(s.name)}`).join('\n');
   return Buffer.from(uris).toString('base64');
 });
-ipcMain.handle('updates:check-app', async () => {
-  return await AppUpdater.checkForUpdates();
+let stagedInstaller: string | undefined;
+let checkingRelease: Promise<Awaited<ReturnType<typeof AppUpdater.checkForUpdates>>> | undefined;
+async function stageUpdate() {
+  const info = await AppUpdater.checkForUpdates();
+  if (!info.hasUpdate || !info.downloadUrl || !info.sha256 || !/^[0-9a-f]{64}$/i.test(info.sha256)) return info;
+  const url = new URL(info.downloadUrl);
+  if (url.origin !== 'https://github.com' || !url.pathname.startsWith('/hidooch980/Ryox-VPN/releases/download/')) return info;
+  const directory = path.join(app.getPath('userData'), 'updates');
+  await fs.promises.mkdir(directory, {recursive:true});
+  const file = path.join(directory, info.sha256 + '.exe');
+  const cached = await fs.promises.readFile(file).catch(() => undefined);
+  if (!cached || !AppUpdater.verifyFileChecksum(cached, info.sha256)) {
+    const res = await fetch(url, {signal:AbortSignal.timeout(300000)});
+    if (!res.ok) return info;
+    const data = Buffer.from(await res.arrayBuffer());
+    if (!AppUpdater.verifyFileChecksum(data, info.sha256)) throw new Error('Update checksum mismatch');
+    await fs.promises.writeFile(file + '.tmp', data);
+    await fs.promises.rename(file + '.tmp', file);
+  }
+  stagedInstaller = file;
+  return info;
+}
+ipcMain.handle('updates:check-app', () => {
+  checkingRelease ??= stageUpdate().finally(() => { checkingRelease = undefined; });
+  return checkingRelease;
+});
+ipcMain.handle('updates:install-staged', async () => {
+  if (!stagedInstaller) return false;
+  const contents = await fs.promises.readFile(stagedInstaller);
+  if (!AppUpdater.verifyFileChecksum(contents, path.basename(stagedInstaller, '.exe'))) return false;
+  return (await shell.openPath(stagedInstaller)) === '';
 });
 
 // ── Smart Connect ─────────────────────────────────────────────────────────────

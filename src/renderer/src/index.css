@@ -77,3 +77,16 @@
 .mobile-tabs {display:none}
 @media(max-width:767px){.session-panels {grid-template-columns:1fr}.session-metrics{grid-template-columns:1fr 1fr}.session-cover{gap:20px}.mobile-tabs{display:grid;grid-template-columns:repeat(4,1fr);background:#101c29;padding:6px 6px max(6px,env(safe-area-inset-bottom));border-top:1px solid #35495a}.mobile-tabs button{min-height:42px;color:#b5c6d1;font-size:.85rem}.mobile-tabs [aria-current]{background:#234b42;color:#d4ffe5;border-radius:8px}.ryox-shell{height:100dvh}}
 @media(prefers-reduced-motion:reduce){.ryox-shell *, .ryox-shell *::before,.ryox-shell *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+.ryox-shell main,.ryox-shell header,.ryox-shell {background:#08141e}
+.ryox-shell .vpn-home {max-width:620px;margin:auto;display:grid;gap:14px;color:#edf5f8}
+.vpn-connection,.vpn-ip,.vpn-pickers>label,.vpn-pickers>button {background:linear-gradient(135deg,#152c37,#0b202a);border:1px solid #337b79;border-radius:24px}
+.vpn-connection{padding:clamp(16px,4vw,25px)}.vpn-overview,.vpn-ip{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.vpn-state {display:inline-block;border:1px solid #286d67;border-radius:99px;padding:3px 11px;color:#79e4d4;font-size:.82rem}
+.vpn-time,.vpn-ip strong {display:block;font-variant-numeric:tabular-nums;font-weight:400}.vpn-time{font-size:clamp(2rem,6vw,3rem);margin:8px 0}
+.vpn-home small,.vpn-hint,.vpn-pickers label span {color:#a6b9c4}.vpn-power{display:grid;place-items:center;border-radius:28%;background:linear-gradient(135deg,#40d2b7,#38b8ed);width:clamp(74px,19vw,110px);aspect-ratio:1;color:#072431}
+.vpn-bandwidth {display:flex;justify-content:center;gap:12px;flex-wrap:wrap;padding:8px;margin-top:20px;border:1px solid #35726f;border-radius:16px;font-size:.8rem;color:#99d4d0}
+.vpn-hint{text-align:center;font-size:.85rem}.vpn-ip{padding:18px;border-color:#7b7042}.vpn-ip div{flex:1}.vpn-ip svg,.vpn-pickers svg{color:#58d5c1}
+.vpn-pickers{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.vpn-pickers label,.vpn-pickers button{display:flex;align-items:center;gap:8px;padding:12px;min-width:0}.vpn-pickers label span{display:grid;flex:1;min-width:0;font-size:.75rem;gap:3px}
+.vpn-pickers select{width:100%;background:#102630;color:#fff;font-size:.95rem}.vpn-pickers button{justify-content:center;font-size:.82rem}.vpn-update{color:#7ae7d6;text-decoration:underline}
+@media(max-width:767px){.mobile-tabs{border:1px solid #337b79;border-radius:23px;margin:6px 12px max(10px,env(safe-area-inset-bottom));background:#102530}.mobile-tabs [aria-current]{background:#195347}.ryox-shell main{padding:14px}}

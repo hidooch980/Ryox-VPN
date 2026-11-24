@@ -90,6 +90,7 @@ export const electronApi = {
   // Diagnostics & Updates
   runDiagnostics: (serverHost?: string): Promise<DiagnosticsResult> => 
     ipcRenderer.invoke('diagnostics:run', serverHost),
+  installStagedUpdate: () => ipcRenderer.invoke('updates:install-staged'),
   checkForAppUpdates: () => ipcRenderer.invoke('updates:check-app'),
   generateWarp: (cleanIp?: string): Promise<VpnServerConfig> => ipcRenderer.invoke('warp:generate', cleanIp),
   scanCleanIps: (): Promise<any[]> => ipcRenderer.invoke('scanner:clean-ips'),
