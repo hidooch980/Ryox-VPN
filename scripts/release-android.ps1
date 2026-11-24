@@ -11,7 +11,7 @@ if ($commit -ne $remote) { throw 'Publish the intended commit to main before rel
 $version = [regex]::Match((Get-Content android/app/build.gradle.kts -Raw), 'versionName = "([0-9]+\.[0-9]+\.[0-9]+)"').Groups[1].Value
 if (!$version) { throw 'Missing Android version' }
 $tag = "android-v$version"
-$dir = Join-Path (Get-Location) "dist-packaged/android-$version"
+$dir = "dist-packaged/android-$version"
 New-Item -ItemType Directory -Force $dir | Out-Null
 function Invoke-ReleaseJob([string]$mode) {
     $url = gh workflow run android-release.yml -R $repo --ref main -f "mode=$mode" -f "release_tag=$tag"
