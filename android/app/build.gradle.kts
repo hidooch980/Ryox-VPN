@@ -7,8 +7,7 @@ plugins {
 
 // Release signing is opt-in and local only. android/keystore.properties is
 // git-ignored (template: android/keystore.properties.example); when it is absent
-// the release build falls back to the debug signing config so a fresh clone still
-// assembles, and nothing here fails.
+// the release APK is unsigned and must be signed before distribution.
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) {
@@ -22,7 +21,7 @@ if (hasReleaseKeystore) {
     if (missingKeys.isNotEmpty()) {
         throw GradleException(
             "android/keystore.properties is missing ${missingKeys.joinToString()} - fill in every key " +
-                "or delete the file to fall back to debug signing."
+                "or delete the file to build an unsigned release."
         )
     }
 }
@@ -37,12 +36,12 @@ android {
         applicationId = "com.ryox.vpn"
         minSdk = 29 // Android 10+
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
-            abiFilters.addAll(listOf("arm64-v8a"))
+            abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64"))
         }
     }
 
@@ -66,12 +65,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Open source builds keep the debug signature; a publishable build
-            // supplies android/keystore.properties and gets a real release config.
+            // Release builds are signed locally, either here or with apksigner after assembly.
             signingConfig = if (hasReleaseKeystore) {
                 signingConfigs.getByName("release")
             } else {
-                signingConfigs.getByName("debug")
+                null
             }
         }
         debug {

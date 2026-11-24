@@ -1,0 +1,75 @@
+name: Android release package
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [build, install-test]
+        required: true
+      release_tag:
+        description: Draft release containing the signed APK for install-test
+        default: android-v1.1.1
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: inputs.mode == 'build'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci && npm run build:renderer && npm run android:assets
+      - run: bash scripts/prepare-android-cores.sh
+      - working-directory: android
+        run: bash gradlew assembleRelease --stacktrace
+      - name: Check release metadata and copy Android signing tool
+        run: |
+          set -euo pipefail
+          apk=android/app/build/outputs/apk/release/app-release-unsigned.apk
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          sdkmanager 'build-tools;35.0.0' >/dev/null
+          "$tools/aapt" dump badging "$apk" > "$RUNNER_TEMP/badging"
+          grep -F "package: name='com.ryox.vpn' versionCode='3' versionName='1.1.1'" "$RUNNER_TEMP/badging"
+          grep -F "application-label:'RYOX VPN'" "$RUNNER_TEMP/badging"
+          if grep -Fq application-debuggable "$RUNNER_TEMP/badging"; then exit 1; fi
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do unzip -Z1 "$apk" | grep -Fx "lib/$abi/libsingbox.so"; done
+          mkdir distribution
+          "$tools/zipalign" -P 16 -f 4 "$apk" distribution/aligned.apk
+          cp "$tools/lib/apksigner.jar" distribution/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-local-signing
+          path: distribution/
+  install:
+    if: inputs.mode == 'install-test'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the signed release candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p 'RYOX-VPN-1.1.1.apk'
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          script: |
+            adb install RYOX-VPN-1.1.1.apk
+            adb shell am start -W -n com.ryox.vpn/.MainActivity
+            sleep 5
+            adb shell pidof com.ryox.vpn
+            adb install -r RYOX-VPN-1.1.1.apk

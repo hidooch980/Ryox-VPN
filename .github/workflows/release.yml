@@ -57,12 +57,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Include Android package
-        uses: actions/download-artifact@v4
-        with:
-          name: RYOX-VPN-v1.1.0-APK
-          path: dist-packaged
-
       - name: Generate Checksums
         shell: pwsh
         run: |
@@ -85,7 +79,6 @@ jobs:
         with:
           files: |
             dist-packaged/*.exe
-            dist-packaged/*.apk
             dist-packaged/*.zip
             dist-packaged/SHA256SUMS.txt
           draft: false
