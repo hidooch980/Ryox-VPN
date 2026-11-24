@@ -21,6 +21,16 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ settings, onSettings
     onSettingsUpdated(updated);
   };
 
+  // An empty or out-of-range box means "disabled" (0), never a half-typed value
+  // that would make the core bind a nonsense port.
+  const handleClashPort = async (raw: string) => {
+    const port = Number.parseInt(raw, 10);
+    const valid = Number.isInteger(port) && port > 0 && port < 65536;
+    const updated = { ...settings, clashApiPort: valid ? port : 0 };
+    await api.saveSettings(updated);
+    onSettingsUpdated(updated);
+  };
+
   return (
     <div className="space-y-6">
       <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-4 backdrop-blur-md">
@@ -131,6 +141,50 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ settings, onSettings
               checked={settings.allowLan}
               onChange={() => handleToggle('allowLan')}
               className="w-4 h-4 accent-cyan-500 rounded cursor-pointer"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Smart Routing & Telemetry */}
+      <div className="space-y-3">
+        <span className="text-xs font-mono font-bold tracking-wider text-slate-400 uppercase">
+          SMART ROUTING & TELEMETRY
+        </span>
+
+        <div className="space-y-2">
+          <div className="p-3.5 rounded-xl border border-slate-800 bg-slate-900/40 flex items-center justify-between">
+            <div className="space-y-0.5">
+              <span className="font-semibold text-xs text-slate-200 block">Auto-Switch on Unhealthy Node</span>
+              <span className="text-[11px] text-slate-400">
+                After three consecutive bad samples (high latency or timeouts), reconnect to the fastest tested node
+                of the same core. Requires measured ping results.
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={Boolean(settings.autoSwitchEnabled)}
+              onChange={() => handleToggle('autoSwitchEnabled')}
+              className="w-4 h-4 accent-cyan-500 rounded cursor-pointer"
+            />
+          </div>
+
+          <div className="p-3.5 rounded-xl border border-slate-800 bg-slate-900/40 flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <span className="font-semibold text-xs text-slate-200 block">Core Telemetry Port (Clash API)</span>
+              <span className="text-[11px] text-slate-400">
+                Loopback port the core exposes for exact traffic counters (e.g. 9090). Leave empty to read the
+                process counters instead. Takes effect on the next connection.
+              </span>
+            </div>
+            <input
+              type="number"
+              min={0}
+              max={65535}
+              value={settings.clashApiPort ? String(settings.clashApiPort) : ''}
+              onChange={(event) => void handleClashPort(event.target.value)}
+              placeholder="off"
+              className="w-24 shrink-0 bg-slate-950/60 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500/60"
             />
           </div>
         </div>

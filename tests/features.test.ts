@@ -17,7 +17,8 @@ describe('New Advanced Features Test Suite', () => {
     expect(warp.privateKey?.length).toBeGreaterThan(20);
     expect(warp.peerPublicKey).toBe('bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wMbgyo=');
     expect(warp.address).toContain('172.16.0.2/32');
-  });
+    // Live registration call (AbortSignal 8s) outlives vitest's 5s default.
+  }, 20000);
 
   it('CleanIpScanner returns sorted IP latency list', async () => {
     const results = await CleanIpScanner.scan(443, 200); // short timeout for testing

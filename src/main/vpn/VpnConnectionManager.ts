@@ -4,11 +4,17 @@ import { CoreManager } from '../core/CoreManager';
 import { SystemProxyManager } from './SystemProxyManager';
 import { KillSwitch } from './KillSwitch';
 import { TrafficMeter, TrafficSample } from './TrafficMeter';
+import { ClashApiClient } from './ClashApiClient';
 import { DiagnosticsService } from '../diagnostics/DiagnosticsService';
+import { HealthMonitor } from './HealthMonitor';
 
 const PING_INTERVAL_TICKS = 5;
 const PING_TIMEOUT_MS = 2000;
 const LOCAL_ENDPOINT_TIMEOUT_MS = 5000;
+/** How often the core controller is polled for throughput. */
+const CLASH_POLL_MS = 1000;
+/** Consecutive controller failures tolerated before falling back. */
+const CLASH_MAX_FAILURES = 3;
 
 export class VpnConnectionManager extends EventEmitter {
   private state: ConnectionState = 'DISCONNECTED';
@@ -27,12 +33,30 @@ export class VpnConnectionManager extends EventEmitter {
   private publicIp?: string;
   private country?: string;
 
-  // Real traffic metering (Windows perf counters of the core process)
+  // Real traffic metering (Clash controller API, or the Windows perf counters
+  // of the core process when the controller is not enabled)
   private meter?: TrafficMeter;
+  private clashClient?: ClashApiClient;
+  private clashTimer?: NodeJS.Timeout;
+  private clashFailures = 0;
   private lastMeterAt = 0;
   private tickCount = 0;
   private pingInFlight = false;
   private killSwitchArmed = false;
+
+  // Health tracking and automatic node switching
+  private health = new HealthMonitor();
+  private autoSwitchCount = 0;
+  private switchInFlight = false;
+  private telemetrySource: 'clash-api' | 'process-counters' = 'process-counters';
+
+  /**
+   * Picks a replacement node when the active one has been unhealthy for several
+   * consecutive samples. Supplied by the main process because the connection
+   * manager deliberately knows nothing about the server catalogue; returning
+   * null means "no better node", which leaves the current session untouched.
+   */
+  private autoSwitchHandler?: (current: VpnServerConfig) => Promise<VpnServerConfig | null>;
 
   /**
    * Monotonic token identifying the current connection attempt. Every `await`
@@ -61,6 +85,11 @@ export class VpnConnectionManager extends EventEmitter {
   /** Current settings snapshot (updated by `settings:save`). */
   public getSettings(): AppSettings {
     return this.settings;
+  }
+
+  /** Registers the node-selection strategy used by the auto-switch loop. */
+  public setAutoSwitchHandler(handler: (current: VpnServerConfig) => Promise<VpnServerConfig | null>): void {
+    this.autoSwitchHandler = handler;
   }
 
   /** Reflect an externally applied kill-switch state in the reported stats. */
@@ -287,22 +316,80 @@ export class VpnConnectionManager extends EventEmitter {
     }
   }
 
-  private startTelemetryLoop(): void {
-    if (this.statsTimer) clearInterval(this.statsTimer);
-
-    this.lastMeterAt = 0;
-    this.tickCount = 0;
-
-    // Throughput comes from the OS counters of the real core process. The old
-    // meter must be stopped first: overwriting the field left the previous
-    // interval running forever, spawning a PowerShell every 2 seconds and
-    // double-counting the traffic.
-    this.meter?.stop();
+  /** Falls back to OS process counters when the controller stays unreachable. */
+  private startProcessMeter(): void {
+    if (this.meter) return;
+    this.telemetrySource = 'process-counters';
     this.meter = new TrafficMeter(
       () => this.coreManager.getActivePid(),
       (sample) => this.handleTrafficSample(sample)
     );
     this.meter.start();
+  }
+
+  private stopTrafficSource(): void {
+    if (this.clashTimer) {
+      clearInterval(this.clashTimer);
+      this.clashTimer = undefined;
+    }
+    this.clashClient = undefined;
+    this.clashFailures = 0;
+    this.meter?.stop();
+    this.meter = undefined;
+  }
+
+  /**
+   * One controller poll. Consecutive failures switch the session to the
+   * process-counter meter: an enabled-but-blocked controller port must not
+   * leave the UI showing a permanent 0 B/s.
+   */
+  private async pollClashApi(client: ClashApiClient): Promise<void> {
+    const sample = await client.sampleTraffic();
+    if (this.clashClient !== client || this.state !== 'CONNECTED') return;
+
+    if (!sample) {
+      this.clashFailures += 1;
+      if (this.clashFailures >= CLASH_MAX_FAILURES) {
+        this.emitLog('WARN', 'Core controller API is unreachable — falling back to process counters.');
+        this.stopTrafficSource();
+        this.startProcessMeter();
+        this.emitStats();
+      }
+      return;
+    }
+
+    this.clashFailures = 0;
+    this.handleTrafficSample(sample);
+  }
+
+  private startTelemetryLoop(): void {
+    if (this.statsTimer) clearInterval(this.statsTimer);
+
+    this.lastMeterAt = 0;
+    this.tickCount = 0;
+    this.health.reset();
+
+    // The previous source must be stopped first: overwriting the field left the
+    // old interval running forever, spawning a PowerShell every 2 seconds and
+    // double-counting the traffic.
+    this.stopTrafficSource();
+
+    // Prefer the core's own controller API when the user enabled it: it reports
+    // exactly the bytes the tunnel moved, works for TUN traffic that never
+    // touches the process's sockets, and needs no elevated process query.
+    const endpoint = this.coreManager.getClashApiEndpoint();
+    if (endpoint) {
+      const client = new ClashApiClient(endpoint.baseUrl, endpoint.secret);
+      this.clashClient = client;
+      this.clashFailures = 0;
+      this.telemetrySource = 'clash-api';
+      this.clashTimer = setInterval(() => {
+        void this.pollClashApi(client);
+      }, CLASH_POLL_MS);
+      void this.pollClashApi(client);
+    } else {
+      this.startProcessMeter();
+    }
 
     this.statsTimer = setInterval(() => {
       if (this.state !== 'CONNECTED') return;
@@ -348,8 +435,44 @@ export class VpnConnectionManager extends EventEmitter {
 
       // -1 means the probe timed out or was rejected: report it as unknown (0).
       this.currentPing = latency >= 0 ? latency : 0;
+
+      // A rejected probe is a real signal (the node stopped answering), so it is
+      // fed to the health monitor as-is instead of being skipped.
+      if (this.health.record({ pingMs: latency })) {
+        void this.maybeAutoSwitch(server, myAttempt);
+      }
+      this.emitStats();
     } finally {
       this.pingInFlight = false;
+    }
+  }
+
+  /**
+   * Replaces a persistently unhealthy node with a better one.
+   *
+   * Guarded three ways: the feature must be enabled, only one switch may run at
+   * a time, and the attempt token must still be current after the async node
+   * search — otherwise a user-initiated reconnect would be fought by the loop.
+   */
+  private async maybeAutoSwitch(current: VpnServerConfig, myAttempt: number): Promise<void> {
+    if (!this.settings.autoSwitchEnabled) return;
+    if (this.switchInFlight || !this.autoSwitchHandler) return;
+    if (myAttempt !== this.attempt || this.state !== 'CONNECTED') return;
+
+    this.switchInFlight = true;
+    try {
+      const replacement = await this.autoSwitchHandler(current);
+      if (!replacement || replacement.id === current.id) return;
+      if (myAttempt !== this.attempt || this.state !== 'CONNECTED') return;
+
+      this.autoSwitchCount += 1;
+      this.emitLog('WARN', `Health dropped below threshold — switching to "${replacement.name}".`);
+      // connect() bumps the attempt token itself, which cancels this loop.
+      await this.connect(replacement);
+    } catch (err) {
+      this.emitLog('WARN', `Automatic node switch failed: ${(err as Error).message}`);
+    } finally {
+      this.switchInFlight = false;
     }
   }
 
@@ -358,10 +481,10 @@ export class VpnConnectionManager extends EventEmitter {
       clearInterval(this.statsTimer);
       this.statsTimer = undefined;
     }
-    this.meter?.stop();
-    this.meter = undefined;
+    this.stopTrafficSource();
     this.lastMeterAt = 0;
     this.tickCount = 0;
+    this.health.reset();
     this.currentDownloadSpeed = 0;
     this.currentUploadSpeed = 0;
     this.currentPing = 0;
@@ -382,7 +505,10 @@ export class VpnConnectionManager extends EventEmitter {
       pingMs: this.currentPing,
       clientIp: this.publicIp,
       clientCountry: this.country,
-      killSwitchArmed: this.killSwitchArmed
+      killSwitchArmed: this.killSwitchArmed,
+      healthScore: this.health.getScore(),
+      telemetrySource: this.telemetrySource,
+      autoSwitchCount: this.autoSwitchCount
     };
   }
 

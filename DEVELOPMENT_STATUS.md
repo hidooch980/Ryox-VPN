@@ -16,7 +16,7 @@ Repository: <https://github.com/hidooch980/Ryox-VPN>
 - **Core Architecture**: Modular multi-core engine — `sing-box`, `Xray-core`, `Mihomo`, `WireGuard`, plus `Wintun` for Layer-3 TUN on Windows
 - **Overall Build Status**: **STABLE (GREEN)** — typecheck, tests, renderer build and Electron build all pass locally and in CI
 - **Published artifacts (v1.0.0 release)**: `RYOX.VPN.Setup.1.0.0.exe` (114 MB), `RYOX.VPN-1.0.0-win.zip` (115.3 MB), `RYOX-VPN-v1.0.0.apk` (47.1 MB), `SHA256SUMS.txt`
-- **Test Suite Status**: **95 / 95 tests passing (9 files)**
+- **Test Suite Status**: **102 tests across 10 files — 91 passing, 11 skipped** (skips are real-binary/real-network cases that need `bin/` and connectivity)
 - **Core Config Validation**: **180 generated configs checked by the real `sing-box 1.14.4` / `Xray 26.11.9` / `Mihomo v1.19.0` binaries — 0 rejected, 15 skipped** (protocol a core genuinely cannot serve) via `npm run validate:cores`
 - **Type Checking**: `npm run typecheck` (renderer + Electron) — clean
 - **Language Support**: فارسی (Persian, RTL) + English
@@ -35,7 +35,7 @@ Repository: <https://github.com/hidooch980/Ryox-VPN>
 | **Phase 6** | Public Free Sources Discovery | **COMPLETED** | Curated GitHub feed scraper with de-duplication and latency testing |
 | **Phase 7** | Advanced Networking | **COMPLETED** | GeoIP/Geosite routing, DNS-over-HTTPS, split tunneling, TLS fragment |
 | **Phase 8** | Automatic Updaters | **COMPLETED** | App updater via GitHub Releases, core updater with SHA256 integrity |
-| **Phase 9** | Automated Testing | **COMPLETED** | 95 Vitest tests across 9 files (unit + integration + real-core config validation) |
+| **Phase 9** | Automated Testing | **COMPLETED** | 102 Vitest tests across 10 files (unit + integration + real-core config validation + credential vault) |
 | **Phase 10** | GitHub CI/CD Automation | **COMPLETED** | Workflows: `ci-tests`, `android-build`, `windows-build`, `release` |
 | **Phase 11** | Release Verification | **COMPLETED** | `v1.0.0` tag → release pipeline published installer, portable zip and APK |
 
@@ -48,19 +48,20 @@ Output of `npm run test` (Vitest):
 ```text
  RUN  v3.2.7
 
- ✓ tests/core-adapters.test.ts (26 tests)
+ ✓ tests/core-adapters.test.ts (26 tests | 10 skipped)
  ✓ tests/killswitch-proxy.test.ts (17 tests)
  ✓ tests/protocol-parser.test.ts (14 tests)
  ✓ tests/server-parsing.test.ts (10 tests)
  ✓ tests/ipc-contract.test.ts (10 tests)
- ✓ tests/vpn-connection.test.ts (6 tests)
+ ✓ tests/secret-vault.test.ts (7 tests)
+ ✓ tests/vpn-connection.test.ts (6 tests | 1 skipped)
  ✓ tests/features.test.ts (5 tests)
  ✓ tests/security-hardening.test.ts (5 tests)
  ✓ tests/updater-verification.test.ts (2 tests)
 
- Test Files  9 passed (9)
-      Tests  95 passed (95)
-   Duration  6.74s
+ Test Files  10 passed (10)
+      Tests  91 passed | 11 skipped (102)
+   Duration  5.03s
 ```
 
 Real-core config validation (`npm run validate:cores`), which compiles `dist-electron/`
@@ -206,6 +207,35 @@ All generated configs were accepted by the real core binaries.
 | Android assets were copied into the APK by hand | Stale hashed bundles shipped inside the APK | `npm run android:assets` replaces the directory and fails when `index.html` references a missing file; CI uses it |
 | Duplicate ~45 MB Android core blobs were tracked | Inflated repository | Removed from the index (`git rm --cached`) and ignored; local copies preserved, licence file kept |
 
+### 3.9 Credential Vault, Controller Telemetry & Auto-Switch
+
+| Area | Before | After |
+| :--- | :--- | :--- |
+| Credential storage | `servers.json` / `subscriptions.json` / `settings.json` held proxy passwords, UUIDs and subscription tokens as plaintext JSON | `src/main/storage/SecretVault.ts` seals every store with AES-256-GCM under a per-install key (`storage.key`, 32 bytes, created on first use). `StorageManager` seals on write and opens on read, so a legacy plaintext file is still readable and is re-sealed by the next save — no separate migration step. `clashApiSecret` is stripped before persisting (runtime-only). |
+| Unreadable envelope | — | An envelope this session cannot open is **left in place** and reported in the log; only a file that is not parseable JSON (or not an array) is quarantined to `.corrupt-<ts>` and recovered from `.bak`. This keeps a temporary keychain failure from destroying data. |
+| Throughput telemetry | Windows performance counters of the core process only — counted the core's own IPC/disk traffic and returned 0 B/s in TUN mode | `src/main/vpn/ClashApiClient.ts` polls the core's Clash-compatible `/connections` endpoint once per second when `clashApiPort` is set (both `SingBoxAdapter` and `MihomoAdapter` emit the controller block only when a port is configured, so a default config is byte-identical to before). Three consecutive failures fall back to the process counters automatically. |
+| Controller secret | — | Generated per session with `crypto.randomBytes(16)` inside `CoreManager` and never logged or persisted, so a token from a previous run cannot authenticate against the new one. |
+| Node health | Ping was displayed but never acted on | `src/main/vpn/HealthMonitor.ts` keeps an EWMA quality score (0-100, `HEALTH_ALPHA` 0.25) mapped from round-trip time; after `HEALTH_SWITCH_AFTER_BAD_SAMPLES` (3) consecutive samples below `HEALTH_BAD_THRESHOLD` (35) the manager reconnects to the fastest same-core node that has a **measured** latency (`src/main/index.ts` supplies the choice). Off by default (`autoSwitchEnabled`). |
+
+```text
+tests/secret-vault.test.ts (7 tests)
+  ✓ never writes credentials as plaintext on disk
+  ✓ round-trips servers through the envelope
+  ✓ reads legacy plaintext and seals it on the next save
+  ✓ does not throw when the payload cannot be decrypted
+  ✓ keeps the local key out of the JSON stores
+  ✓ opens what it seals
+  ✓ does not persist the runtime-only clash API token
+```
+
+Release workflow now installs the cores (`scripts/setup-cores.ps1 -Force`) and fails the job when any
+of `bin/sing-box.exe`, `bin/xray.exe`, `bin/mihomo.exe` is missing, then runs `npm run validate:cores`
+before packaging — a release can no longer ship without the binaries it needs.
+
+> Validation caveat: `npm run validate:cores` compiles `dist-electron/` first, so `npm run build:electron`
+> must run before it. In a checkout without `bin/` it reports `0 checks, 0 failed, 60 skipped` and exits 0,
+> which is why the release workflow installs the cores before validating.
+
 ---
 
 ## 4. Build Status & Verification
@@ -213,7 +243,7 @@ All generated configs were accepted by the real core binaries.
 | Step | Command | Result |
 | :--- | :--- | :--- |
 | Typecheck (renderer + Electron) | `npm run typecheck` | exit 0 |
-| Unit/integration tests | `npm run test` | 95/95 pass (9 files, 6.74 s) |
+| Unit/integration tests | `npm run test` | 91 pass / 11 skipped (10 files, 5.03 s) |
 | Real-core config validation | `npm run validate:cores` | 180 checks, 0 failed, 15 skipped |
 | Renderer bundle | `npm run build:renderer` | 2245 modules → `dist/` |
 | Electron main + preload | `npm run build:electron` | → `dist-electron/` |
@@ -234,6 +264,10 @@ Packaging prerequisites that are now committed and verified:
 - Android release builds are signed with the debug keystore (open-source default) — replace with a private keystore before a Play Store submission.
 - Android TUN currently captures traffic through the mixed inbound + `setHttpProxy` path (`CAPTURE_ALL_TRAFFIC_IN_TUN = false`). A default `addRoute("0.0.0.0", 0)` needs a core build that accepts a passed-in TUN file descriptor, which the bundled `libsingbox.so` does not expose.
 - The Android kill switch is a documented no-op and reports `UNAVAILABLE` (`VpnService` has no firewall API); only the desktop build has a real kill switch.
+- The credential vault's key lives in `%APPDATA%\.ryox-vpn\storage.key` next to the sealed stores, so it protects against casual inspection, backup/cloud sync of the JSON, and log paste leaks — not against an attacker who can already read the user profile. Losing the key makes the sealed stores unreadable; the app then reports the condition and leaves the files untouched instead of deleting them.
+- Auto-switch only considers nodes whose latency was measured by an explicit ping test in the same session; an untested node is never assumed to be faster. With no measured alternatives the feature stays idle rather than guessing.
+- A freshly generated WARP profile carries `latency: -1` (unprobed) rather than a hard-coded 35 ms, because Smart Connect ranks on `latency` and a made-up value used to outrank genuinely measured nodes. Run a ping test to give a WARP profile a real figure.
+- `tests/features.test.ts` calls the live Cloudflare WARP registration endpoint; that one test overrides vitest's 5 s default with a 20 s timeout. Without connectivity it falls back to the standard WARP pool allocation and still passes.
 - Repository size is dominated by committed Android native cores (`libsingbox.so`, `sing-box` arm64 binary, `singbox-arm64.tar.gz`); see "Next Steps".
 
 ---

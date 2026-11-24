@@ -2,6 +2,7 @@ import { spawn, execFile, ChildProcess } from 'child_process';
 import * as net from 'net';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import { SupportedCore, VpnServerConfig, AppSettings, CoreMetadata } from '../../shared/types';
 import { XrayAdapter } from './adapters/XrayAdapter';
 import { SingBoxAdapter } from './adapters/SingBoxAdapter';
@@ -55,6 +56,11 @@ export class CoreManager {
   private logCallback?: (level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG', msg: string) => void;
   private exitCallback?: (code: number | null, signal: NodeJS.Signals | null) => void;
   private virtualActive = false;
+  /**
+   * Controller endpoint of the running session, published for telemetry.
+   * Null when the user has not configured `clashApiPort` or no core is running.
+   */
+  private clashApiEndpoint: { baseUrl: string; secret?: string } | null = null;
 
   constructor(baseDir?: string, options: CoreManagerOptions = {}) {
     const root = baseDir || path.join(process.env.APPDATA || process.env.HOME || '.', '.ryox-vpn');
@@ -279,11 +285,18 @@ export class CoreManager {
       return false;
     }
 
+    // A fresh controller secret per session: a token from a previous run must not
+    // unlock the new one. It is never logged — the logs go to the renderer.
+    const wantsClashApi = typeof settings.clashApiPort === 'number' && settings.clashApiPort > 0;
+    const effectiveSettings: AppSettings = wantsClashApi
+      ? { ...settings, clashApiSecret: crypto.randomBytes(16).toString('hex') }
+      : settings;
+
     // Build the config before spawning: an unsupported protocol/core pair now
     // throws instead of producing a config the core will refuse to load.
     let args: string[];
     try {
-      args = this.writeCoreConfig(preferredCore, server, settings);
+      args = this.writeCoreConfig(preferredCore, server, effectiveSettings);
     } catch (err) {
       this.log('ERROR', `Cannot build a ${preferredCore} configuration: ${(err as Error).message}`);
       this.currentCore = null;
@@ -291,6 +304,9 @@ export class CoreManager {
     }
 
     this.currentCore = preferredCore;
+    this.clashApiEndpoint = wantsClashApi
+      ? { baseUrl: `http://127.0.0.1:${settings.clashApiPort}`, secret: effectiveSettings.clashApiSecret }
+      : null;
     this.log('INFO', `Starting ${preferredCore} with target node: ${server.name} (${server.server}:${server.port})`);
 
     const localPort = settings.inboundSocksPort || 10808;
@@ -439,6 +455,7 @@ export class CoreManager {
     this.activeProcess = null;
     this.currentCore = null;
     this.virtualActive = false;
+    this.clashApiEndpoint = null;
 
     if (!proc || proc.exitCode !== null) return;
 
@@ -507,5 +524,15 @@ export class CoreManager {
    */
   public getActivePid(): number | undefined {
     return this.activeProcess?.pid;
+  }
+
+  /**
+   * Loopback controller endpoint for the current session, or null when the
+   * telemetry port is not configured / nothing is running. The secret changes
+   * on every start, so a stale client can never talk to a new core.
+   */
+  public getClashApiEndpoint(): { baseUrl: string; secret?: string } | null {
+    if (!this.isRunning()) return null;
+    return this.clashApiEndpoint;
   }
 }

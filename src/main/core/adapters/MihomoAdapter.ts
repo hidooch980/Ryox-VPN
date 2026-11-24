@@ -224,6 +224,12 @@ export class MihomoAdapter {
       rules
     };
 
+    // Same opt-in controller as the sing-box adapter: absent unless a port is set.
+    if (typeof settings.clashApiPort === 'number' && settings.clashApiPort > 0) {
+      clashConfig['external-controller'] = `127.0.0.1:${settings.clashApiPort}`;
+      if (settings.clashApiSecret) clashConfig.secret = settings.clashApiSecret;
+    }
+
     return yaml.stringify(clashConfig);
   }
 }

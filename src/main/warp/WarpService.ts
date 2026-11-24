@@ -62,7 +62,9 @@ export class WarpService {
       mtu: 1420,
       countryCode: 'CF',
       countryName: 'Cloudflare Edge',
-      latency: 35,
+      // Unprobed by definition — a fresh profile has never been dialled, and a
+      // made-up 35 ms used to rank it above measured nodes in Smart Connect.
+      latency: -1,
       isFavorite: true,
       createdAt: Date.now(),
       updatedAt: Date.now()

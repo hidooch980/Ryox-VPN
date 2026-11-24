@@ -33,6 +33,21 @@ jobs:
       - name: Build Application
         run: npm run build
 
+      - name: Install and Verify VPN Cores
+        shell: pwsh
+        run: |
+          & .\scripts\setup-cores.ps1 -Force
+          $cores = @("sing-box.exe", "xray.exe", "mihomo.exe")
+          foreach ($core in $cores) {
+            $path = Join-Path "bin" $core
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Required VPN core is missing: $path"
+            }
+          }
+
+      - name: Validate Core Configurations
+        run: npm run validate:cores
+
       - name: Package Windows Executables
         run: npx electron-builder --win nsis zip --x64
         env:

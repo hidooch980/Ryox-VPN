@@ -157,6 +157,17 @@ export interface AppSettings {
   autoSubscribeEnabled?: boolean;
   autoSubscribeIntervalHours?: number;
   killSwitchEnabled?: boolean;
+
+  /** Move to a healthier node automatically when the active one degrades. */
+  autoSwitchEnabled?: boolean;
+  /** Loopback port of the core's Clash-compatible API. 0 disables it. */
+  clashApiPort?: number;
+  /**
+   * Runtime-only API token injected by CoreManager right before a config is
+   * generated. It is never written to disk: the renderer never sends it, so
+   * `settings:save` cannot persist it.
+   */
+  clashApiSecret?: string;
 }
 
 export interface LiveStats {
@@ -174,6 +185,12 @@ export interface LiveStats {
   clientCity?: string;
   /** True only when OS-level firewall protection is actually installed. */
   killSwitchArmed?: boolean;
+  /** EWMA health score of the active node, 0-100; undefined until measured. */
+  healthScore?: number;
+  /** Where the throughput numbers came from on the last sample. */
+  telemetrySource?: 'clash-api' | 'process-counters';
+  /** Automatic node switches performed in this session. */
+  autoSwitchCount?: number;
 }
 
 export interface LogEntry {

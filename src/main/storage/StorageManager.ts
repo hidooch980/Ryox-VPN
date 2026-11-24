@@ -1,18 +1,31 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { AppSettings, VpnServerConfig, Subscription } from '../../shared/types';
+import { SecretVault } from './SecretVault';
 
+/**
+ * Owns the on-disk JSON stores.
+ *
+ * Every value written here passes through {@link SecretVault}, so server
+ * credentials and subscription tokens are not readable as plaintext. Files
+ * written by an older build stay readable: the vault returns legacy plaintext
+ * untouched and the next save re-seals it, which migrates an install in place
+ * without a separate migration pass.
+ */
 export class StorageManager {
   private baseDir: string;
   private settingsFile: string;
   private serversFile: string;
   private subscriptionsFile: string;
+  private vault: SecretVault;
 
   constructor(customPath?: string) {
     this.baseDir = customPath || path.join(process.env.APPDATA || process.env.HOME || '.', '.ryox-vpn');
     if (!fs.existsSync(this.baseDir)) {
       fs.mkdirSync(this.baseDir, { recursive: true });
     }
+
+    this.vault = new SecretVault(this.baseDir);
 
     this.settingsFile = path.join(this.baseDir, 'settings.json');
     this.serversFile = path.join(this.baseDir, 'servers.json');
@@ -47,7 +60,8 @@ export class StorageManager {
     try {
       if (fs.existsSync(this.settingsFile)) {
         const raw = fs.readFileSync(this.settingsFile, 'utf-8');
-        return { ...defaults, ...JSON.parse(raw) };
+        const stored = this.vault.open<Partial<AppSettings>>(JSON.parse(raw));
+        if (stored) return { ...defaults, ...stored };
       }
     } catch (e) {
       console.warn('[StorageManager] Error reading settings:', e);
@@ -56,7 +70,10 @@ export class StorageManager {
   }
 
   public saveSettings(settings: AppSettings): void {
-    this.writeAtomic(this.settingsFile, JSON.stringify(settings, null, 2));
+    // The runtime-only clash API token is never persisted, even if a caller
+    // hands over a settings object that carries one.
+    const { clashApiSecret: _ignored, ...persistable } = settings;
+    this.writeAtomic(this.settingsFile, JSON.stringify(this.vault.seal(persistable), null, 2));
   }
 
   /**
@@ -70,7 +87,7 @@ export class StorageManager {
   }
 
   public saveServers(servers: VpnServerConfig[]): void {
-    this.writeAtomic(this.serversFile, JSON.stringify(servers, null, 2));
+    this.writeAtomic(this.serversFile, JSON.stringify(this.vault.seal(servers), null, 2));
   }
 
   public getSubscriptions(): Subscription[] {
@@ -78,7 +95,21 @@ export class StorageManager {
   }
 
   public saveSubscriptions(subs: Subscription[]): void {
-    this.writeAtomic(this.subscriptionsFile, JSON.stringify(subs, null, 2));
+    this.writeAtomic(this.subscriptionsFile, JSON.stringify(this.vault.seal(subs), null, 2));
+  }
+
+  /**
+   * Parse file contents into an array, unwrapping the vault envelope when
+   * present. `value` is null for anything that is not a readable array so the
+   * caller can fall through to quarantine + backup recovery; `sealed` records
+   * whether the file was an envelope at all, which distinguishes "corrupt" from
+   * "sealed with a key this session does not have".
+   */
+  private decodeArray<T>(contents: string): { value: T[] | null; sealed: boolean } {
+    const parsed = JSON.parse(contents) as unknown;
+    const sealed = this.vault.isSealed(parsed);
+    const value = this.vault.open<unknown>(parsed);
+    return { value: Array.isArray(value) ? (value as T[]) : null, sealed };
   }
 
   /** A node the adapters can actually consume: non-empty host and a real port. */
@@ -125,8 +156,15 @@ export class StorageManager {
     if (!fs.existsSync(file)) return [];
 
     try {
-      const parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
-      if (Array.isArray(parsed)) return parsed as T[];
+      const decoded = this.decodeArray<T>(fs.readFileSync(file, 'utf-8'));
+      if (decoded.value) return decoded.value;
+      if (decoded.sealed) {
+        // The envelope is intact but this process cannot open it (a locked or
+        // missing OS keychain, a different user account). Leave the file where
+        // it is: quarantining it would hide data a later run could still read.
+        console.error(`${label}: ${file} is sealed with a key this session cannot use; leaving it in place`);
+        return [];
+      }
       console.error(`${label}: ${file} did not contain a JSON array`);
     } catch (e) {
       console.error(`${label}: ${file} is corrupt:`, e);
@@ -144,12 +182,14 @@ export class StorageManager {
     const backup = `${file}.bak`;
     if (fs.existsSync(backup)) {
       try {
-        const parsedBackup = JSON.parse(fs.readFileSync(backup, 'utf-8'));
-        if (Array.isArray(parsedBackup)) {
-          // Restore the main file so later reads stay consistent.
-          this.writeAtomic(file, JSON.stringify(parsedBackup, null, 2));
+        const parsedBackup = this.decodeArray<T>(fs.readFileSync(backup, 'utf-8')).value;
+        if (parsedBackup) {
+          // Restore the main file so later reads stay consistent. The backup is a
+          // byte copy of an already-sealed file, so re-sealing is a no-op shape-wise
+          // and legacy plaintext backups get sealed here.
+          this.writeAtomic(file, JSON.stringify(this.vault.seal(parsedBackup), null, 2));
           console.warn(`${label}: recovered ${parsedBackup.length} entries from ${backup}`);
-          return parsedBackup as T[];
+          return parsedBackup;
         }
       } catch (e) {
         console.warn(`${label}: backup ${backup} is unusable:`, e);

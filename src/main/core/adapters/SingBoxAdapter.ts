@@ -185,6 +185,17 @@ export class SingBoxAdapter {
       config.endpoints = [proxy.endpoint];
     }
 
+    // Optional telemetry endpoint. Emitted only when a port is configured, so a
+    // default install produces byte-identical config to before this feature.
+    if (typeof settings.clashApiPort === 'number' && settings.clashApiPort > 0) {
+      config.experimental = {
+        clash_api: {
+          external_controller: `127.0.0.1:${settings.clashApiPort}`,
+          secret: settings.clashApiSecret
+        }
+      };
+    }
+
     return config;
   }
 

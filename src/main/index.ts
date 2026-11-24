@@ -202,6 +202,31 @@ if (cachedServers.length <= 3 || cachedServers.some(s => s.server.includes('ryox
   storage.saveServers(cachedServers);
 }
 
+/**
+ * Node-selection strategy for the auto-switch loop.
+ *
+ * The connection manager cannot pick a node itself — it deliberately has no
+ * access to the server catalogue — so the main process supplies the choice.
+ * Only nodes with a measured latency are candidates: an untested node is not
+ * evidence of being healthier than the degraded one.
+ */
+vpnManager.setAutoSwitchHandler(async (current: VpnServerConfig) => {
+  const candidates = storage
+    .getServers()
+    .filter(
+      (s) =>
+        s.id !== current.id &&
+        typeof s.latency === 'number' &&
+        s.latency > 0 &&
+        // The replacement must run on the same core; switching cores mid-session
+        // would also mean rebuilding the system proxy for a different layout.
+        (s.core || settings.activeCore) === (current.core || settings.activeCore)
+    )
+    .sort((a, b) => (a.latency ?? 0) - (b.latency ?? 0));
+
+  return candidates.length > 0 ? candidates[0] : null;
+});
+
 // Background auto-fetch of hundreds of live public servers
 setTimeout(async () => {
   try {
