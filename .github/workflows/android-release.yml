@@ -75,6 +75,15 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: signed-install-candidate
+      - name: Download the previous stable Android package for upgrade testing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          tags=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[].tagName')
+          previous=$(printf '%s\n%s\n' "$tags" "$TAG" | grep -E '^android-v[0-9]+\.[0-9]+\.[0-9]+$' | sort -Vu | awk -v current="$TAG" '$0==current {print prev; exit} {prev=$0}')
+          test -n "$previous"
+          gh release download "$previous" --repo "$GITHUB_REPOSITORY" -p "RYOX-VPN-${previous#android-v}.apk" -O previous.apk
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -85,7 +94,8 @@ jobs:
           api-level: 35
           arch: x86_64
           script: |
-            adb install candidate.apk
+            adb install previous.apk
+            adb install -r candidate.apk
             adb shell am start -W -n com.ryox.vpn/.MainActivity
             sleep 5
             adb shell pidof com.ryox.vpn
